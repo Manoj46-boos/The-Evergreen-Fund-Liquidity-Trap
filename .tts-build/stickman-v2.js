@@ -1,0 +1,3125 @@
+"use strict";
+/**
+ * Stickman v2 — the "premium ink" rendering upgrade (PATCH 3).
+ *
+ * v1 limbs were constant-width strokes: clean, but flat — like vector clip
+ * art rather than drawn animation. v2 gives every limb a tapered polygon
+ * (thick at the joint, thin at the extremity) with round caps, small hand
+ * discs, rounded shoes, a two-layer radial ground shadow with a short gold
+ * "stage" line, eye glints, and subtle cheek warmth.
+ *
+ * Skeletal math is 100% unchanged — poses still come from Stickman.poseAt,
+ * so every existing scene, walk cycle and gesture blend keeps working.
+ * Zero new dependencies. drawStickmanV2 is a drop-in for drawStickman at
+ * any call site.
+ *
+ * AUDIT-2 (the 100-judge panel report) applied on top:
+ *  §10.1/0.1 far limbs draw in occlusion INK (a value step), never alpha;
+ *  §10.1/0.2 the blink runs a raised-cosine curve, not a step;
+ *  §10.1/0.6 the mouth has four shapes keyed to the talk envelope;
+ *  §10.2/1.1 LINE BOIL — endpoints jitter on a 3-phase 10Hz clock;
+ *  §10.2/1.2 the expression rig: eyelids, brow shapes, pupil dilation;
+ *  §10.2/1.3 mitten hand glyph below rig scale 1.0;
+ *  §10.2/1.4 a collar break separates head from scarf;
+ *  §10.3 foreground parallax factor 0.25 → 0.40 (D1);
+ *  §8/C4 stroke weights + face features sized to survive the 320px feed.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.talkAt = talkAt;
+exports.visemeAt = visemeAt;
+exports.taper = taper;
+exports.limb2 = limb2;
+exports.handGlyph = handGlyph;
+exports.groundShadowV2 = groundShadowV2;
+exports.drawStickmanV2 = drawStickmanV2;
+const theme_1 = require("./theme");
+const easing_1 = require("./easing");
+const collision_1 = require("./collision");
+const effects_1 = require("./effects");
+const perception_1 = require("./perception");
+// PHASE 3 COMPOSITION (Visual Audit — Composition & value): subject
+// figures self-measure their drawn bbox and register the frame-area
+// occupancy they own; the harness asserts the family floors.
+const composition_1 = require("./composition");
+// PHASE 1 PROP LEDGER: the renderer reports every prop that actually fires
+// so the harness gate can catch call sites that bypass resolveProp().
+const scene_props_1 = require("./scene-props");
+const D2R = Math.PI / 180;
+/**
+ * PHASE 3 (Composition & value) — the figure's drawn-bbox tracker. One
+ * figure at a time: drawStickmanV2 resets it at entry, the joint/anchor
+ * sites touch it as they compute positions, and the subject registers
+ * its frame-area occupancy at exit. Local (rig) units — the registrant
+ * scales by the staging rig to screen px.
+ */
+const FIG_BB = { on: false, minX: 0, maxX: 0, minY: 0, maxY: 0 };
+function bbReset() {
+    FIG_BB.on = true;
+    FIG_BB.minX = 1e9;
+    FIG_BB.maxX = -1e9;
+    FIG_BB.minY = 1e9;
+    FIG_BB.maxY = -1e9;
+}
+function bbTouch(x, y, pad = 0) {
+    if (!FIG_BB.on)
+        return;
+    if (x - pad < FIG_BB.minX)
+        FIG_BB.minX = x - pad;
+    if (x + pad > FIG_BB.maxX)
+        FIG_BB.maxX = x + pad;
+    if (y - pad < FIG_BB.minY)
+        FIG_BB.minY = y - pad;
+    if (y + pad > FIG_BB.maxY)
+        FIG_BB.maxY = y + pad;
+}
+/**
+ * 100-JUDGE PANEL / Phase 1 item 1 — THE CHOSEN-ONE COLOR (report §6
+ * Phase 1, "One owned color"): the host's body-mass color, ONE constant
+ * for the whole film. goldDeep (#8F6E12) over the toned rooms is a
+ * silhouette the thumbnail and the 320px feed both read — the single
+ * biggest character-score item on the panel's list. Becker head,
+ * hands, shoe wedges and limb strokes stay ink (the joints); the
+ * prof/walker background variants keep ink (different PEOPLE, not the
+ * brand). Referenced by the torso mass and the rolled-sleeve cuffs.
+ */
+const BODY_MASS = '#7A5D10';
+/**
+ * P1 (100-judge audit §13 — SIGNATURE IDENTITY): the two-tone outfit. The
+ * cast was "generic person with glasses and a mustard tee" — anonymous at
+ * feed scale. The premium read: a dark bronze tee under a GOLD VEST panel
+ * (~38% of torso height, 2px ink outline) — the two-tone silhouette a viewer
+ * can name in three seconds, riding the existing one-light ink language.
+ * trouser stays the ink register (#2A3432 family) the limbs already draw.
+ */
+// VAULT NOIR v3 — THE TAILORED SUIT: the host wears a midnight-navy
+// tailored suit (tee = the suit body, vest = the suit front) with a
+// steel-blue silk scarf and brass trims. Deliberately NOT the previous
+// film's gold-vest identity.
+const OUTFIT = { tee: '#24304E', vest: '#2E4068', trouser: '#1B2542' };
+/** AUDIT-ROUND-3 iter-2 (ONE INK, ALL FOUR LIMBS): the gold near-arm
+ *  sleeve (ARM_MASS) read to the re-review panel as "the near limb
+ *  darker/warmer in tone than the far — the mismatched limb shading
+ *  persists in a subtler form". The torso owns the gold; ALL limbs draw
+ *  in the one ink. Depth is overlap + width + the knuckle joints. */
+const lerp2 = (a, b, t) => a + (b - a) * t;
+/**
+ * CONTACT VERBS (P2 grammar, dossier follow-up) — closed-form 2-bone IK.
+ *
+ * The P2 rule: every scene declares what the hand DOES to the object —
+ * bracket the pie wedge, palm the rack face, tap the 493 wall. Poses are
+ * angle-based, so "the hand lands ON the object" needs the two arm angles
+ * SOLVED from a scene-space target. This solver is a pure function of
+ * (shoulder, target, lengths) — no state, no integration, scrub-safe like
+ * everything else in the engine.
+ *
+ * Angle convention matches limb2(): degrees from the DOWN axis, positive
+ * toward screen-right (x = sin(a)·len, y = cos(a)·len). `bend` picks the
+ * elbow side (+1 = elbow offset toward positive base rotation). When the
+ * target is out of reach the arm straightens toward it (clamped inside
+ * [12, lenU+lenL−2] so the elbow never inverts) — the hand always points
+ * AT the object, and scenes place the host inside reach so it lands on it.
+ */
+function armIk(sx, sy, tx, ty, lenU, lenL, bend) {
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const d = Math.max(12, Math.min(lenU + lenL - 2, Math.hypot(dx, dy)));
+    const base = Math.atan2(dx, dy);
+    const cosA = Math.max(-1, Math.min(1, (lenU * lenU + d * d - lenL * lenL) / (2 * lenU * d)));
+    const A = Math.acos(cosA);
+    const aU = base + bend * A;
+    const ex = sx + Math.sin(aU) * lenU;
+    const ey = sy + Math.cos(aU) * lenU;
+    const aL = Math.atan2(tx - ex, ty - ey);
+    return { aU: (aU * 180) / Math.PI, aL: (aL * 180) / Math.PI };
+}
+/**
+ * v3 (panel P0-4) — deterministic talk envelope: max mouth openness across
+ * words near local time t. `wordTimes` are ms-local to the beat — the same
+ * array SceneCtx already carries for caption sync and head nods, so routing
+ * it to the mouth costs nothing. Rise fast / fall slow reads as
+ * articulation; between sentences the mouth returns to the smile/neutral
+ * line. Pure function of t — scrub-determinism preserved.
+ */
+function talkAt(t, wordTimes) {
+    let open = 0;
+    for (const wt of wordTimes) {
+        const a = t - wt;
+        if (a >= -20 && a <= 260) {
+            const p = a < 0 ? 0 : a / 260;
+            // 100-JUDGE REPORT (fix R10 — THE HELD GAPE): the old envelope peaked
+            // at p≈0.87 — 226ms INTO each word — so the mouth was widest just as
+            // each word ended and never fully closed between words: the presenter
+            // gasped through narration. The envelope now peaks at ~96ms (the
+            // articulation lands with the syllable onset) and returns to zero for
+            // the last ~70ms of every word slot — real inter-word closure.
+            const env = Math.sin(Math.PI * Math.min(1, p * 1.35));
+            open = Math.max(open, env);
+        }
+        if (wt > t + 300)
+            break;
+    }
+    return open;
+}
+const VISIEME_BY_FIRST_LETTER = {
+    b: 'A', m: 'A', p: 'A', // bilabial (closed)
+    k: 'B', s: 'B', t: 'B', g: 'B', z: 'B', c: 'B', // velar/alveolar (slightly open)
+    e: 'C', a: 'C', // front vowel (open)
+    f: 'D', v: 'D', // labiodental (wide)
+    o: 'E', // rounded back (OW)
+    u: 'F', w: 'F', // rounded high (UW)
+    i: 'H', y: 'H', // open back (AH)
+};
+function visemeAt(t, wordTimes, words) {
+    let activeIdx = -1;
+    for (let i = 0; i < wordTimes.length; i++) {
+        if (wordTimes[i] <= t && t < wordTimes[i] + 280)
+            activeIdx = i;
+        if (wordTimes[i] > t + 50)
+            break;
+    }
+    if (activeIdx < 0 || activeIdx >= words.length)
+        return 'X';
+    const w = words[activeIdx].toLowerCase().replace(/[^a-z]/g, '');
+    if (!w)
+        return 'X';
+    if (w.startsWith('th'))
+        return 'G';
+    if (w.startsWith('sh') || w.startsWith('ch'))
+        return 'B';
+    if (w.startsWith('oo'))
+        return 'F';
+    const v = VISIEME_BY_FIRST_LETTER[w[0]];
+    return v ?? 'X';
+}
+/**
+ * v3 mouth (panel P0-4) — when `talk` is high the mouth becomes an open,
+ * articulate jaw (dark rounded interior + ivory teeth/tongue hint so it
+ * stays light); otherwise the v2 smile/neutral line. The v1/v2 static
+ * curve mouth ran for ~18 of ~21 minutes of speech — the single biggest
+ * character-liveliness loss in the panel review.
+ */
+function drawMouthV2(ctx, eyeDX, smile, talk, 
+/** BLUEPRINT Phase 2: jaw multiplier for the reaction beats — the
+ *  shock pose drives a 2x jaw opening (a gasp reads at distance; a
+ *  polite 4px ellipse does not). 1 = normal speech. */
+jawX = 1, 
+/** P1-1 (audit Table 3): mouth ink — '#FFFFFF' on the becker solid
+ *  head, PALETTE.ink everywhere else. */
+col = theme_1.PALETTE.ink, 
+/** AUDIT-ROUND-2 (fix 9 — FACE FLOOR AT SCALE): true when the figure
+ *  draws above rig scale 1.5 — the mouth's minimum width lifts to
+ *  12px so the speaking mouth survives the 320px gate next to the
+ *  enlarged eyes (a 7px-wide ellipse reads as a pinhole at feed
+ *  scale). */
+bigFace = false, 
+/** 100-JUDGE AUDIT (Part 8.2): the Preston Blair viseme shape. When
+ *  provided, the mouth uses the 9-shape system instead of the 4-shape
+ *  envelope. 'X' = rest (no viseme — falls back to envelope). */
+viseme = 'X') {
+    // 100-JUDGE REPORT (fix R1 — THE PERMANENT-ALARM GASP): the reaction
+    // multiplier ran to 2.0 — at the shock close-up's faceScale the mouth
+    // height hit ~79 screen px, the largest single feature on the face.
+    // The gasp keeps a committed 1.5x ceiling: still a gasp at distance,
+    // no longer a yelling void.
+    jawX = Math.min(jawX, 1.5);
+    // AUDIT-ROUND-2 (fix 9): the width floor — 12px minimum in the
+    // face-floor regime, scaled smoothly below it.
+    // PHASE-1 FACE FILL (audit §7 — FILLED VISEME INTERIOR): the mouth is a
+    // filled cavity, and the cavity now READS as one: the width floors lift
+    // (12 → 15 hero / 7 → 9 compact), every open shape runs ~25% taller, and
+    // the interior gains a darker cavity wedge + warm tongue hint so the open
+    // mouth reads as depth (a cavity), not as a flat ink blob.
+    // B4 RE-SPEC (Visual Quality Audit §3.1 — THUMBNAIL-FACE PARITY): the
+    // mouth is the face's third mass — the floors lift one step (15 → 17
+    // hero / 9 → 10 compact) so the film's talking face carries the
+    // thumbnail's mouth presence at every rig.
+    const wFloor = bigFace ? 17 : 10;
+    const mouthCavity = (cx, cy, rw, rh) => {
+        ctx.fillStyle = 'rgba(28,22,16,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + rh * 0.18, rw * 0.62, rh * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // the tongue hint — one warm arc at the cavity's floor
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.down, 0.38);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + rh * 0.42, rw * 0.44, rh * 0.26, 0, 0, Math.PI * 2);
+        ctx.fill();
+    };
+    const mx = eyeDX * 0.6;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = col;
+    // 100-JUDGE AUDIT (Part 8.2) retired — PHASE-1 VISUAL AUDIT (Fix 4 —
+    // MOUTH SHAPES REDUCED TO 4 THAT READ AT FEED): the 9-shape Preston
+    // Blair viseme system produced distinctions (FV vs TH vs KST slots)
+    // that collapse into the same 2-3px slot at the 320px gate — nine
+    // shapes of mush. The mouth now runs FOUR open registers only — the
+    // closed line, the small-open slot, the wide-open jaw, the round-O —
+    // mapped by viseme class, then the proven 4-shape talk envelope below.
+    if (viseme !== 'X' && talk > 0.15) {
+        const w = Math.max(wFloor, 6 + talk * 4);
+        const h = (2.5 + talk * 6.5) * jawX;
+        switch (viseme) {
+            case 'A': // closed (MBP) — flat line, slightly compressed
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(mx - w * 0.7, 15);
+                ctx.lineTo(mx + w * 0.7, 15);
+                ctx.stroke();
+                return;
+            case 'C': // wide-open register (EH)
+            case 'H': // wide-open register (AH) — full jaw drop
+                {
+                    const rw = w * (viseme === 'H' ? 0.9 : 1.0);
+                    const rh = h * (viseme === 'H' ? 1.375 : 0.875) * jawX;
+                    ctx.fillStyle = col;
+                    ctx.beginPath();
+                    ctx.ellipse(mx, 15, rw, rh, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    mouthCavity(mx, 15, rw, rh);
+                    ctx.fillStyle = '#FDFCF8';
+                    ctx.beginPath();
+                    ctx.ellipse(mx, 15 - rh * 0.32, rw * 0.55, rh * 0.22, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    return;
+                }
+            case 'E': // round-O register (OW)
+            case 'F': // round-O register (UW) — small tight circle
+                {
+                    const rw = w * (viseme === 'E' ? 0.6 : 0.45);
+                    const rh = h * (viseme === 'E' ? 1.06 : 0.5) * jawX;
+                    ctx.fillStyle = col;
+                    ctx.beginPath();
+                    ctx.ellipse(mx, 15, rw, rh, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (viseme === 'E') {
+                        mouthCavity(mx, 15, rw, rh);
+                        ctx.fillStyle = '#FDFCF8';
+                        ctx.beginPath();
+                        ctx.ellipse(mx, 15 - rh * 0.35, rw * 0.55, rh * 0.2, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    return;
+                }
+            // B / D / G — the small-open slot register (one shape; G keeps its
+            // single teeth bar — the only viseme-specific detail that survives
+            // the transcode)
+            // B4 RE-SPEC (Visual Quality Audit §3.1 — THE CURL-MOUTH): the G
+            // teeth bar rendered as a white worm across the dark slot below hero
+            // scales — the "bug on the face" read. The bar is a hero-scale detail
+            // only: below bigFace the slot runs clean.
+            default:
+                {
+                    ctx.fillStyle = col;
+                    ctx.beginPath();
+                    ctx.ellipse(mx, 15, w * 0.75, h * 0.4 * jawX, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (viseme === 'G' && bigFace) {
+                        ctx.fillStyle = '#FDFCF8';
+                        ctx.fillRect(mx - w * 0.55, 13.8, w * 1.1, 2.5);
+                    }
+                    return;
+                }
+        }
+    }
+    // AUDIT-2 / 0.6 (report §10.1, C2): the FOUR-SHAPE mouth (original envelope).
+    // two-state system (smile arc | one open ellipse) flapped; these
+    // thresholds (0.18 / 0.55 / 0.85) carve the SAME talk envelope into
+    // closed / small-open / wide-open / round-O shapes — articulation
+    // from data the engine already receives.
+    if (talk > 0.85) {
+        // the round "O" — peak openness: taller than wide, reads at distance
+        const w = Math.max(wFloor + 2, 6.5 + (talk - 0.85) * 12);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(mx, 15, w, w * 1.3 * jawX, 0, 0, Math.PI * 2);
+        ctx.fill();
+        mouthCavity(mx, 15, w, w * 1.3 * jawX);
+        ctx.fillStyle = '#FDFCF8';
+        ctx.beginPath();
+        ctx.ellipse(mx, 15 - w * 0.55 * jawX, w * 0.5, w * 0.24 * jawX, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else if (talk > 0.55) {
+        // wide-open articulate jaw (the v3 shape, retuned + FACE FILL heights)
+        const w = Math.max(wFloor, 7.5 + talk * 3);
+        const h = (5 + (talk - 0.55) * 20) * jawX;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(mx, 15, w, h, 0, 0, Math.PI * 2);
+        ctx.fill();
+        mouthCavity(mx, 15, w, h);
+        ctx.fillStyle = '#FDFCF8';
+        ctx.beginPath();
+        ctx.ellipse(mx, 15 - h * 0.45, w * 0.55, h * 0.28, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else if (talk > 0.18) {
+        // small-open — mid-energy speech: a modest rounded opening
+        const w = Math.max(wFloor - 1, 6 + talk * 4);
+        const h = (3 + talk * 8) * jawX;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(mx, 15, w, h, 0, 0, Math.PI * 2);
+        ctx.fill();
+        mouthCavity(mx, 15, w, h);
+        ctx.fillStyle = '#FDFCF8';
+        ctx.beginPath();
+        ctx.ellipse(mx, 15 - h * 0.45, w * 0.55, h * 0.26, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else if (smile > 0.05) {
+        // FACE FILL — the rest smile is a FILLED crescent now, not a 5px
+        // stroke: the mouth is the face's third mass (brows / eyes / mouth)
+        // and a thin line was the first thing the feed dissolved.
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(-9 + mx, 13);
+        ctx.quadraticCurveTo(mx, 14 + smile * 11, 9 + mx, 13);
+        ctx.quadraticCurveTo(mx, 16.5 + smile * 3, -9 + mx, 13);
+        ctx.closePath();
+        ctx.fill();
+    }
+    else {
+        // the neutral mouth — a filled soft slot (same fill logic at rest)
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(mx, 14.5, 7, 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+// ── AUDIT-2 / 1.1 (report §10.2): LINE BOIL ─────────────────────────────────
+// The cheapest "premium ink" upgrade available to a deterministic canvas
+// engine: a 3-phase boil clock at 10Hz (one phase every 100ms — animation
+// "on threes" at 30fps), every limb endpoint jittered ±0.8px by a hash
+// keyed on (joint, phase). Clean vectors read as puppets; boiling ink
+// reads as drawn. Scrub-determinism survives because the jitter is a pure
+// function of QUANTIZED time.
+const BOIL_MS = 100;
+let boilT = -1; // set per drawStickmanV2 call; -1 disables (direct taper() calls)
+let boilJoint = 0; // per-draw joint counter so each joint boils independently
+// P2-6 (100-judge audit, Table 4 — THE MOTION-SCALED BOIL): the audit's
+// §5.2 law — "quiet poses boil on threes at the full 4.5px, but statement
+// frames and fast gestures drop to on-twos at half amplitude... Type
+// should never boil; only ink boils." At 30fps the 10Hz 3-phase boil can
+// STROBE at the phone gate (the downsample leaves ~1.4px of wobble —
+// flicker reads as compression artifacts). The register now scales:
+//   boilFast (set per draw when the figure is mid-gesture-spring, smear
+//   > 0.45): ON-TWOS at HALF amplitude — the trail carries the motion,
+//   the jitter must not fight it;
+//   boilQuiet (statement frames — the director's calm plates): on-twos
+//   at half amplitude too (the typography already carries no boil; the
+//   figure calm beside it reads composed, not frozen).
+let boilFast = false;
+/** AUDIT-ROUND-3 (Fix 1 — THE SCALE-AWARE BOIL): the boil register is in
+ *  LOCAL rig units, so at the host's rig 2.6 the old 4.5 displaced every
+ *  joint endpoint ±11.7px of SCREEN wobble at 10Hz — a shiver the phone
+ *  gate reads as compression noise and 1080p reads as a nervous puppet.
+ *  boilReset now receives the rig scale and boilOff caps the amplitude
+ *  to BOIL_CAP_PX of SCREEN wobble at ANY scale: ±4px at the host, less
+ *  per-joint at smaller rigs — alive ink, never a shiver. */
+let boilRigScale = 1;
+const BOIL_CAP_PX = 4.0;
+function boilReset(t, fast = false, rigScale = 1) {
+    boilT = t;
+    boilJoint = 0;
+    boilFast = fast;
+    boilRigScale = Math.max(0.5, rigScale);
+    // 100-JUDGE AUDIT (Part 8.3): reset the line-texture joint counter too,
+    // so each draw call cycles through the 6 variations deterministically.
+    lineTexReset();
+}
+function boilOff() {
+    if (boilT < 0)
+        return { dx: 0, dy: 0 };
+    // P1 (Verdict report — THE PER-RIG BOIL TABLE): the report offers two
+    // branches — floor the wobble at 1.5px on the 320 twin, or drop the boil
+    // below rig 1.5 entirely. The floor branch is geometrically impossible
+    // under the ±4px screen cap (4px at 1080p downscales to 0.67px at the
+    // feed — no legal amplitude reaches 1.5px there), so the table takes the
+    // report's alternative: rigs under 1.5 draw CLEAN vectors (half a texture
+    // reads worse than none), rigs at 1.5+ keep the capped alive-ink wobble.
+    if (boilRigScale < 1.5)
+        return { dx: 0, dy: 0 };
+    // P2-6: quiet = on-threes (3 phases, full amplitude); fast = on-twos
+    // (2 phases), half amplitude.
+    const mod = boilFast ? 2 : 3;
+    // P2 U11 (COMMIT THE INK TEXTURE): the boil register is HERO-VISIBLE —
+    // at rig >= 2 (the close-ups the panel studies) the screen cap rises
+    // 4 -> 6px: the wobble reads as hand-drawn ink, not a texture the eye
+    // must squint at. Mid rigs (1.5-2) keep the certified 4px cap; below
+    // 1.5 the vectors stay clean (the existing gate).
+    const capPx = boilRigScale >= 2 ? 6.0 : BOIL_CAP_PX;
+    const amp = (boilFast ? 0.5 : 1) * Math.min(perception_1.AMP.boilPx, capPx / boilRigScale);
+    const phase = Math.floor(boilT / BOIL_MS) % mod;
+    const j = boilJoint++;
+    // BLUEPRINT Phase 1 (AMP.boilPx): ±0.85 -> ±2.2 px — the drawn-ink
+    // wobble must survive the 6x downscale to the 320px feed; at ±0.85 it
+    // was 0.22px there, i.e. a clean vector, i.e. a puppet.
+    // B14 RE-SPEC (Visual Quality Audit — UNIFORM NOISE, NOT HAND-DRAWN
+    // LIFE): the uniform per-joint hash read as render noise — every
+    // endpoint wobbled independently, so strokes shimmered instead of
+    // wobbling. Hand-drawn ink wobbles as a CURVE: the offset now derives
+    // from the STROKE (a limb's two endpoints share one stroke id, 60% of
+    // the amplitude travels together) with a ±25% per-endpoint variation
+    // (curvature change, not noise). Same clock, same caps — coherent ink.
+    const stroke = j >> 1; // a limb's two endpoints share one stroke id
+    const sx = ((0, easing_1.hash01)(stroke * 13.71 + phase * 7.7) - 0.5) * amp * 1.2;
+    const sy = ((0, easing_1.hash01)(stroke * 29.7 + phase * 11.3 + 5) - 0.5) * amp * 1.2;
+    const vx = ((0, easing_1.hash01)(j * 17.31 + phase * 3.1) - 0.5) * amp * 0.5;
+    const vy = ((0, easing_1.hash01)(j * 29.7 + phase * 5.9 + 5) - 0.5) * amp * 0.5;
+    return { dx: sx + vx, dy: sy + vy };
+}
+// 100-JUDGE AUDIT (Part 8.3 — HAND-DRAWN LINE TEXTURE). The boil alone is
+// uniform — every joint jitters by the same amplitude distribution, so the
+// eye reads "rendered" instead of "drawn". Real hand-drawn animation has
+// line texture that VARIES: some strokes are heavier, some are lighter,
+// some have a flick at the end. The fix: 6 pre-baked stroke-weight
+// variations per limb segment, cycled deterministically by (joint, phase).
+// Each variation multiplies the limb's w0/wJ/w1 taper widths by a slightly
+// different factor (0.92, 0.96, 1.00, 1.04, 1.08, 0.98) so the line weight
+// itself varies per frame — the audience reads "a hand drew each frame"
+// without knowing why. Pure function of (joint, quantized time).
+const LINE_TEX_VARIATIONS = [0.92, 0.96, 1.00, 1.04, 1.08, 0.98];
+function lineTexScale(jointIdx) {
+    // B14: the width texture keys on the STROKE (jointIdx >> 1) so a whole
+    // stroke draws heavier/lighter together — the hand-drawn read the
+    // per-endpoint cycle could not produce.
+    if (boilT < 0)
+        return 1;
+    const phase = Math.floor(boilT / BOIL_MS);
+    const idx = ((jointIdx >> 1) * 7 + phase) % LINE_TEX_VARIATIONS.length;
+    return LINE_TEX_VARIATIONS[(idx + LINE_TEX_VARIATIONS.length) % LINE_TEX_VARIATIONS.length];
+}
+let lineTexJoint = 0;
+function lineTexReset() { lineTexJoint = 0; }
+function lineTexNext() { return lineTexScale(lineTexJoint++); }
+/** THE DRAWN LINE (AUDIT-ROUND-3, Fix 1). The external panel's close-up
+ *  verdict on the shipped taper — "every limb is a filled vector polygon...
+ *  geometry masquerading as draftsmanship... a shape-built Flash/After
+ *  Effects puppet, not an animated drawing" — convicted the construction,
+ *  not the tuning: a filled quad with cap arcs renders as clip-art no
+ *  matter the widths. Every limb now renders as INK LAID BY A BRUSH: a
+ *  curved stroked path (see drawnBone) sampled in short segments, each
+ *  segment carrying its own stepped width (the pressure taper), round
+ *  caps blending the steps into a smooth drawn line. Canvas stroke
+ *  anti-aliasing + the per-frame lineTex width variation = the line
+ *  weight varies the way a hand-drawn line's does. */
+function taper(ctx, x, y, ex, ey, w0, w1, col) {
+    drawnBone(ctx, x, y, ex, ey, w0, w1, col, 0);
+}
+/** A curved, pressure-tapered bone — ONE continuous shape. PHASE-4
+ *  (report §11 Phase 4 — the single stroked path): the bone was sampled as
+ *  4 separately-stroked segments with round caps; at every alpha the cap
+ *  discs double-painted at the three joints and read as a bead chain, and
+ *  the taper stepped 4 times. The bone is now ONE ribbon: the same
+ *  quadratic the old code computed (de Casteljau, `bow` unchanged) sampled
+ *  at 14 points, offset along the normal by the pressure width —
+ *  smooth taper as width along the path — and closed with round brush
+ *  ends. One fill call (cheaper than four strokes), one paint everywhere
+ *  (uniform alpha — the beads die at every alpha), round-cap AA quality
+ *  identical to a stroke. */
+function drawnBone(ctx, x, y, ex, ey, w0, w1, col, bow) {
+    const SEG = 14;
+    const mx = (x + ex) / 2, my = (y + ey) / 2;
+    const dx = ex - x, dy = ey - y;
+    const L = Math.hypot(dx, dy) || 1;
+    const cx = mx + (-dy / L) * bow, cy = my + (dx / L) * bow;
+    // sample the quadratic once: points, tangents, widths
+    const qx = [], qy = [], tx = [], ty = [], ww = [];
+    for (let i = 0; i <= SEG; i++) {
+        const k = i / SEG;
+        const ax = lerp2(x, cx, k), ay = lerp2(y, cy, k);
+        const bx = lerp2(cx, ex, k), by = lerp2(cy, ey, k);
+        const px = lerp2(ax, bx, k), py = lerp2(ay, by, k);
+        // derivative of the quadratic — the tangent
+        const dax = 2 * (cx - x), day = 2 * (cy - y);
+        const dbx = 2 * (ex - cx), dby = 2 * (ey - cy);
+        const vx = lerp2(dax, dbx, k), vy = lerp2(day, dby, k);
+        const vl = Math.hypot(vx, vy) || 1;
+        qx.push(px);
+        qy.push(py);
+        tx.push(vx / vl);
+        ty.push(vy / vl);
+        ww.push(Math.max(lerp2(w0, w1, k), 0.5));
+    }
+    // VAULT NOIR v3 — CYLINDER MATERIAL: every bone fills with a linear
+    // gradient across its own normal — shadowed underside → core → lit
+    // edge. The figure reads as a lit porcelain sculpture instead of a
+    // flat ink ribbon. Same path, same geometry, same collision boxes.
+    {
+        const gi = 7;
+        const gnx = -ty[gi], gny = tx[gi], gw = Math.max(ww[gi], 4);
+        const grad = ctx.createLinearGradient(qx[gi] + gnx * gw, qy[gi] + gny * gw, qx[gi] - gnx * gw, qy[gi] - gny * gw);
+        grad.addColorStop(0, (0, theme_1.hexLerp)(col, '#050912', 0.34));
+        grad.addColorStop(0.52, col);
+        grad.addColorStop(1, (0, theme_1.hexLerp)(col, '#FFFFFF', 0.36));
+        ctx.fillStyle = grad;
+    }
+    ctx.beginPath();
+    // left offset forward, around the wrist cap, right offset back, around
+    // the shoulder cap
+    for (let i = 0; i <= SEG; i++) {
+        const nx = -ty[i], ny = tx[i], hw = ww[i] / 2;
+        const lx = qx[i] + nx * hw, ly = qy[i] + ny * hw;
+        if (i === 0)
+            ctx.moveTo(lx, ly);
+        else
+            ctx.lineTo(lx, ly);
+    }
+    const endA = Math.atan2(ty[SEG], tx[SEG]);
+    ctx.arc(qx[SEG], qy[SEG], ww[SEG] / 2, endA + Math.PI / 2, endA - Math.PI / 2, true);
+    for (let i = SEG; i >= 0; i--) {
+        const nx = -ty[i], ny = tx[i], hw = ww[i] / 2;
+        ctx.lineTo(qx[i] - nx * hw, qy[i] - ny * hw);
+    }
+    const startA = Math.atan2(ty[0], tx[0]);
+    ctx.arc(x, y, ww[0] / 2, startA - Math.PI / 2, startA + Math.PI / 2, true);
+    ctx.closePath();
+    ctx.fill();
+}
+/** Two-bone drawn limb ending in a hand disc. Returns the hand position.
+ *  AUDIT-ROUND-3 (Fix 1 — THE DRAWN LIMB): the shipped limb was two
+ *  straight filled quads meeting at a hard miter — the close-up judge
+ *  read "two tapered quadrilaterals hinged at a kinked elbow with a
+ *  hard-cornered bend". Three changes make it a drawn limb:
+ *   1. each BONE BOWS — a small quadratic curvature to the OUTSIDE of
+ *      the joint's bend (the way drawn limbs curve; straight bones read
+ *      as rig rods);
+ *   2. the joint carries a KNUCKLE mass — a rounded disc slightly wider
+ *      than the line, the elbow/knee anatomy that replaces the miter;
+ *   3. the bones render as pressure-tapered stroked ink (drawnBone).
+ *  Boil jitter (AUDIT-2 / 1.1) and the `lift` term ride unchanged. */
+function limb2(ctx, x, y, aUpper, aLower, lenU, lenL, w0, wJ, w1, col, lift = 0, 
+/** AUDIT-ROUND-3 iter-3 (panel: "the knee balls are identical to the
+ *  elbow balls, which no joint logic supports"): the knuckle mass
+ *  multiplier. Knees carry more mass than elbows — legs call with
+ *  1.14, arms with 0.92. */
+jointK = 1) {
+    const mx = x + Math.sin(aUpper * D2R) * lenU;
+    const my = y + Math.cos(aUpper * D2R) * lenU;
+    let ex = mx + Math.sin(aLower * D2R) * lenL;
+    let ey = my + Math.cos(aLower * D2R) * lenL - lift;
+    const b1 = boilOff();
+    const b2 = boilOff();
+    const jx = mx + b1.dx, jy = my + b1.dy;
+    ex += b2.dx;
+    ey += b2.dy;
+    // 100-JUDGE AUDIT (Part 8.3 — HAND-DRAWN LINE TEXTURE): each limb segment
+    // picks up a slightly different stroke weight from the 6-variation cycle,
+    // so the line itself reads as "drawn by hand" instead of "rendered".
+    const t0 = lineTexNext();
+    const t1 = lineTexNext();
+    // the bow: each bone curves to the OUTSIDE of the joint's bend,
+    // proportional to how far the joint actually bends (straight limb =
+    // near-zero bow). sin of the turn angle, floored low so a resting limb
+    // still carries a whisper of curvature.
+    const v1x = jx - x, v1y = jy - y, v2x = ex - jx, v2y = ey - jy;
+    const L1 = Math.hypot(v1x, v1y) || 1, L2 = Math.hypot(v2x, v2y) || 1;
+    // AUDIT-ROUND-3 iter-2: the bow floor rises 0.15 → 0.25 — a resting
+    // limb still carries a whisper of curvature ("still no knee
+    // articulation — two straight tapered columns").
+    // 100-JUDGE PANEL REPORT (fix A4): the RAW bend (no floor) is kept for
+    // the joint-mass gate — a rest-pose limb's near-straight geometry must
+    // not carry a knuckle disc.
+    const rawBend = Math.min(1, Math.abs((v1x * v2y - v1y * v2x) / (L1 * L2)));
+    const bend = Math.min(1, Math.max(0.25, rawBend));
+    const BOW = 2.8 * bend;
+    const n1x = -v1y / L1, n1y = v1x / L1;
+    const side1 = (n1x * v2x + n1y * v2y) < 0 ? 1 : -1;
+    const n2x = -v2y / L2, n2y = v2x / L2;
+    const side2 = (n2x * v1x + n2y * v1y) < 0 ? 1 : -1;
+    drawnBone(ctx, x, y, jx, jy, w0 * t0, wJ * t0, col, side1 * BOW);
+    drawnBone(ctx, jx, jy, ex, ey, wJ * t1, w1 * t1, col, side2 * BOW);
+    // AUDIT-ROUND-3 iter-2 — THE INK SPINE: a wide solid limb reads as a
+    // flat ribbon no matter how it is constructed ("silhouette-fills
+    // pretending to be linework... zero pressure variation"). A second,
+    // narrower stroke along the same curved path — offset toward the
+    // film's upper-right light, in a lifted tone — gives every limb a
+    // visible line-weight interior: the lit side of a drawn cylinder.
+    // One light, every limb, always the same side.
+    // AUDIT-ROUND-3 iter-3 (panel: "one uniform-width stroke applied like
+    // a decal — a true pressure spine TAPERS"): the spine now enters at
+    // 55% of the bone's width at the root and feathers to 25% at the
+    // extremity — thick where the muscle is, hairline at the wrist/ankle.
+    const inner = (0, theme_1.hexLerp)(col, '#FFFFFF', 0.34);
+    const ls1 = (n1x * 0.7 + n1y * -0.7 >= 0) ? 1 : -1;
+    const ls2 = (n2x * 0.7 + n2y * -0.7 >= 0) ? 1 : -1;
+    drawnBone(ctx, x + n1x * ls1 * w0 * t0 * 0.15, y + n1y * ls1 * w0 * t0 * 0.15, jx + n1x * ls1 * wJ * t0 * 0.15, jy + n1y * ls1 * wJ * t0 * 0.15, w0 * t0 * 0.55, wJ * t0 * 0.32, inner, side1 * BOW * 0.85);
+    drawnBone(ctx, jx + n2x * ls2 * wJ * t1 * 0.15, jy + n2y * ls2 * wJ * t1 * 0.15, ex + n2x * ls2 * w1 * t1 * 0.15, ey + n2y * ls2 * w1 * t1 * 0.15, wJ * t1 * 0.55, w1 * t1 * 0.25, inner, side2 * BOW * 0.85);
+    // the knuckle — the joint mass (elbow/knee) that kills the miter read.
+    // 100-JUDGE PANEL REPORT (fix A4): the disc draws ONLY on a real bend.
+    // PHASE-1 VISUAL AUDIT (report Phase 1 — Joints, frame evidence
+    // BEFORE_fix2-joints): the audit's "lumps" verdict — the disc fired on
+    // EVERY mid bend (sin 35°) at 0.55×wJ, so ordinary poses carried beads
+    // at the elbows. The gate TIGHTENS to sin 45° (0.707 — the bend where a
+    // knee/elbow VISUALLY articulates) and the radius SHRINKS 40%
+    // (0.55 → 0.33×wJ): a knuckle is a hinge hint, not a pad.
+    if (rawBend > 0.707) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(jx, jy, wJ * 0.33 * jointK, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // PHASE-1 VISUAL AUDIT (Fix 1 — the WRIST TAPER): the end disc was
+    // 0.72×w1 — as wide as the hand mass root, so forearm met hand at full
+    // width ("a mitten welded to a tube"). The disc shrinks to a WRIST BALL
+    // (0.46×w1): the forearm now visibly narrows before the hand glyph's
+    // mass flares past it — the drawn-character wrist every glyph below
+    // inherits for free.
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(ex, ey, w1 * 0.46 * t1, 0, Math.PI * 2);
+    ctx.fill();
+    return { ex, ey };
+}
+/** roundRect as a SUBPATH of the CURRENT path — identical geometry to
+ *  theme.roundRect (same arcTo corner sequence, same <10px rect fallback)
+ *  but WITHOUT the internal beginPath. PHASE-1 VISUAL AUDIT (Fix 1): the
+ *  pre-inked hand glyphs are multi-part masses (palm + separated finger
+ *  bars) unioned in ONE nonzero-winding fill; the theme helper's internal
+ *  beginPath wiped the palm subpath, leaving only the last bar on the
+ *  path — the hands drew as bare fingers. */
+function rrSub(ctx, x, y, w, h, r) {
+    if (w < 10 || h < 10) {
+        ctx.rect(x, y, w, h);
+        ctx.closePath();
+        return;
+    }
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr); // top-right corner
+    ctx.arcTo(x + w, y + h, x, y + h, rr); // bottom-right corner
+    ctx.arcTo(x, y + h, x, y, rr); // bottom-left corner
+    ctx.arcTo(x, y, x + w, y, rr); // top-left corner
+    ctx.closePath();
+}
+// exported for tools/pose-sheet.mjs — the character model-sheet renderer
+function handGlyph(ctx, x, y, // hand position from limb2()
+forearmAngle, // the pose's lower-arm angle, degrees
+s, col, // glyph size unit (16 near / 12 far at the call sites)
+rigScale = 1, // P1-2 r3: the figure's rig scale — picks the glyph tier
+mode = undefined, // P1-2: explicit glyph override (fist / countN)
+grip = 1 // PANEL ACCEPTANCE (audit FIX 5): the re-grip flex
+// 0.84..1.16 — finger splay breathes on a slow clock
+) {
+    const a = forearmAngle * D2R;
+    // FP0 (Verdict P0 — SCREEN-SPACE HAND FLOORS): hands were sized in fixed
+    // local units, so at side-host rigs the palm was ~11px and the index tip
+    // dissolved to a nub — the film's entire contact vocabulary was invisible
+    // at exactly the scales where contact verbs fire. The glyph unit now
+    // clamps to a screen-space palm floor (>= 12px at 1080p), and the point
+    // glyph's fingertip carries its own floor below (>= 12px at 1080p = 2px
+    // at the 320 twin for contact verbs).
+    // B2 RE-SPEC (Visual Quality Audit §3.1 — WITHERED HANDS): the 13px floor
+    // still shipped nub hands on the re-specified ink limbs — a hand must
+    // read as a HAND at every staging, so the palm floor rises to 20px
+    // screen space (the smallest hand a cold viewer names as a hand on a
+    // 1080p frame) and the point glyph's fingertip floor rises to 14px.
+    s = Math.max(s, 20 / Math.max(0.5, rigScale));
+    // P1-2 (100-judge audit, Table 3 — HANDS): the FIST + COUNT glyphs.
+    // "Featureless mitts in every pose" / "a withered claw" — and the
+    // count poses had nothing to count WITH. The fist: a rounded mass + a
+    // thumb bar; countN: the same fist with N fingers extended — a hand
+    // that literally counts, at any scale.
+    // PHASE-1 (100-judge report §11 Phase 1 — ONE HAND LANGUAGE): the
+    // presenting override is RETIRED with the splay fan — an unadorned hand
+    // at ANY scale is the MITTEN (resting and presenting alike), and the
+    // contact override ('palm' = touch/bracket) joins the POINT glyph: a
+    // mitten with one extended index finger lands the touch and names the
+    // direction. The vocabulary is exactly three glyphs: mitten, point,
+    // fist/count.
+    if (mode === 'palm') {
+        mode = 'point';
+    }
+    // PHASE-1 VISUAL AUDIT (report Phase 1 — Hands): 'grip' joins as the
+    // canonical closed-contact glyph name ('fist' survives as its alias) —
+    // the poses say grip because the hand GRIPS an object.
+    // P1 U2 (HANDS THAT CAN ACT — the hold-card read): the grip mapped
+    // straight to the FIST — zero fingers on every held-card/coin-stack
+    // frame, exactly the blob the audit convicts. At rig ≥ 1.4 the grip
+    // now renders the OPEN four-finger hand (the fingers wrap the held
+    // edge); below, the fist mass holds (the feed twin).
+    if (mode === 'grip') {
+        mode = rigScale >= 1.4 ? 'open' : 'fist';
+    }
+    // 100-JUDGE VISUAL AUDIT (Phase 1 — HANDS TO FIVE GLYPHS): the hero-tier
+    // swap. At rig ≥ 2 (the editorial and reaction stagings — the frames the
+    // panel studies) the bare mitten retires: a resting/presenting hand
+    // renders OPEN (fingers separated at close-up scale), and the count-one
+    // gesture renders as the PINCH — the thumb-and-index "exactly this" hand.
+    // Below rig 2 the feed-scale vocabulary is unchanged (mitten/count read
+    // at 320px; fingers would dissolve to noise).
+    // B2 RE-SPEC (Visual Quality Audit §3.1): the open four-finger hand is
+    // the DEFAULT resting hand from rig 1.4 up — one hand language on every
+    // staging a viewer can see a face at, not just the hero frames; below
+    // 1.4 the mitten holds (fingers dissolve to noise at feed scale).
+    if (!mode && rigScale >= 1.4) {
+        mode = 'open';
+    }
+    if (mode === 'count1' && rigScale >= 2) {
+        mode = 'pinch';
+    }
+    if (mode === 'fist' || mode === 'count1' || mode === 'count2' || mode === 'count3') {
+        const n = mode === 'fist' ? 0 : Number(mode.slice(5));
+        // A2 (100-JUDGE PANEL REPORT): ONE filled path — the fist mass and the
+        // N extended fingers are subpaths of a single beginPath/fill (nonzero
+        // winding), rooted INSIDE the mass so the union silhouette is one hand
+        // (the old per-stroke tapers read as disconnected splat legs).
+        // PHASE-5 FIX (D-09 — THE LEMON HANDS): the fillStyle was set INSIDE
+        // the save/translate/rotate block and the fill() ran AFTER restore() —
+        // restore pops fillStyle back to whatever the caller last filled with
+        // (the #A8851B rolled sleeve, the scarf's gold, gold numerals), so
+        // every fist at a contact/point call site rendered in that leftover
+        // gold: the panel's "cast hands read as blobs/lemon at 1080p". The
+        // fill now happens AFTER restore with col set explicitly — hands are
+        // ink, the documented PHASE-1 language.
+        ctx.save();
+        ctx.translate(x + Math.sin(a) * s * 0.1, y + Math.cos(a) * s * 0.1);
+        ctx.rotate(a);
+        ctx.beginPath();
+        // PHASE-1 VISUAL AUDIT (Fix 1 — THE PRE-INKED GRIP): the capsule ran
+        // the FULL hand (-0.4s..+0.4s) with two unioned scallops — a mitten
+        // with lumps. The mass now stops at the palm (+0.14s) and the FOUR
+        // fingers wrap as SEPARATE rounded bars rooted in it, real gaps
+        // between them: the drawn-character grip the report prescribes
+        // ("pre-inked glyphs drawn with finger breaks"), reading at close-up;
+        // below rig 1.25 the plain mass silhouette holds (feed).
+        (0, theme_1.roundRect)(ctx, -s * 0.42, -s * 0.34, s * 0.56, s * 0.7, s * 0.26);
+        if (rigScale >= 1.25) {
+            // P1 U2: the knuckle breaks floor into the audit's readable band —
+            // the old s*0.13 bars were 2.3px at rig 1.5 (invisible: the mitt).
+            for (const fy of [-0.32, -0.115, 0.09, 0.295]) {
+                rrSub(ctx, s * 0.05, fy * s, s * 0.46, Math.max(s * 0.13, 5), s * 0.055);
+            }
+        }
+        ctx.restore();
+        // the N extended fingers — PHASE-1: roots buried DEEP in the fist mass
+        // (0.30s → 0.14s along the axis, base width 0.30s → 0.34s) so the
+        // fingers leave the mass as one webbed bundle — never as separate
+        // splinters; the ±0.34 rad splay still breathes with the re-grip clock
+        for (let f = 0; f < n; f++) {
+            const off = (f - (n - 1) / 2) * 0.34 * grip;
+            const fa = a + off;
+            const bx = x + Math.sin(a) * s * 0.14, by = y + Math.cos(a) * s * 0.14;
+            const ex = x + Math.sin(fa) * s * 1.04, ey = y + Math.cos(fa) * s * 1.04;
+            const px2 = Math.sin(fa + Math.PI / 2), py2 = Math.cos(fa + Math.PI / 2);
+            const w0 = s * 0.34, w1 = s * 0.15, dx = Math.sin(fa), dy = Math.cos(fa);
+            ctx.moveTo(bx - px2 * w0 / 2, by - py2 * w0 / 2);
+            ctx.lineTo(ex - px2 * w1 / 2, ey - py2 * w1 / 2);
+            ctx.quadraticCurveTo(ex + dx * w1 * 0.7, ey + dy * w1 * 0.7, ex + px2 * w1 / 2, ey + py2 * w1 / 2);
+            ctx.lineTo(bx + px2 * w0 / 2, by + py2 * w0 / 2);
+            ctx.closePath();
+        }
+        ctx.fillStyle = col; // AFTER restore — the fix that un-lemons the hand
+        ctx.fill();
+        // the thumb bar across the fist — the closed-hand read
+        taper(ctx, x + Math.sin(a) * s * 0.06, y + Math.cos(a) * s * 0.06, x + Math.sin(a + 1.15) * s * 0.52, y + Math.cos(a + 1.15) * s * 0.52, s * 0.28, s * 0.15, col);
+        return;
+    }
+    // ── PHASE-1 — THE POINT GLYPH (100-judge report §11 Phase 1) ──
+    // A mitten with a single extended index finger: the film's ONE contact
+    // and pointing hand. pointR/pointL poses and every contact-verb scene
+    // (pie bracket, wall brace, pump point — they all pass the 'palm'
+    // override, mapped to 'point' above) land here. The finger continues
+    // the forearm's axis, rooted DEEP inside the mass, and the thickened
+    // mitten mass + thumb lobe carry the hand's volume behind it. The read
+    // is touch + direction; the splayed claw is retired.
+    if (mode === 'point') {
+        // FP0 (Verdict P0 — A TRUE TAPERED FINGER): the old single taper ended
+        // in a s*0.15 nub that dissolved at every contact rig — the point read
+        // as an arm aimed at the data, never a hand touching it. The index is
+        // now TWO segments with a visible knuckle: proximal (root -> knuckle)
+        // and distal (knuckle -> tip), the tip width floored in SCREEN space
+        // (12px at 1080p = 2px at the 320 twin — the verdict's contact floor).
+        // B2 RE-SPEC (Visual Quality Audit §3.1): the fingertip floor rises to
+        // 14px — the finger must terminate as a readable tip on every contact
+        // rig, not as the last visible pixel.
+        // P1 U2 (HANDS THAT CAN ACT): the finger floored at 14 SCREEN px flat
+        // — the audit's number, not 14/rigScale (which gave 9.3px at rig 1.5:
+        // an invisible finger on every working rig). The taper widens WITH the
+        // floor so the finger reads as a taper, not a trumpet: the whole
+        // distal/proximal chain lifts to keep root ≥ tip.
+        const tipW = Math.max(s * 0.16, 14);
+        const distW = Math.max(s * 0.27, 15.5);
+        const proxW = Math.max(s * 0.36, 17);
+        const knX = x + Math.sin(a) * s * 0.80, knY = y + Math.cos(a) * s * 0.80;
+        const tiX = x + Math.sin(a) * s * 1.48, tiY = y + Math.cos(a) * s * 1.48;
+        taper(ctx, x + Math.sin(a) * s * 0.06, y + Math.cos(a) * s * 0.06, knX, knY, proxW, distW, col); // proximal phalanx
+        taper(ctx, knX, knY, tiX, tiY, distW, tipW, col); // distal phalanx
+        ctx.fillStyle = col; // the knuckle — the joint the eye reads as a finger
+        ctx.beginPath();
+        ctx.arc(knX, knY, s * 0.185, 0, Math.PI * 2);
+        ctx.fill();
+        // the palm mass — stops at the index root; the folded pair leave it
+        // as SEPARATE bars with real gaps (the pre-inked finger breaks)
+        ctx.save();
+        ctx.translate(x + Math.sin(a) * s * 0.36, y + Math.cos(a) * s * 0.36);
+        ctx.rotate(a);
+        ctx.beginPath();
+        (0, theme_1.roundRect)(ctx, -s * 0.62, -s * 0.44, s * 0.84, s * 0.9, s * 0.4);
+        if (rigScale >= 1.25) {
+            for (const fy of [-0.33, -0.15, 0.03]) {
+                rrSub(ctx, s * 0.02, fy * s, s * 0.44, s * 0.13, s * 0.055);
+            }
+        }
+        ctx.restore();
+        // the thumb lobe — a rounded bump on the wrist side, ONE subpath of
+        // the mass's own path (PHASE-5 D-09: the stale beginPath here used to
+        // wipe the palm mass before its fill — the point hand drew as a bare
+        // finger + floating lobe; the mass path now survives to the fill)
+        {
+            const fa = a + 1.05;
+            const bx = x + Math.sin(a) * s * 0.36, by = y + Math.cos(a) * s * 0.36;
+            const ex = x + Math.sin(fa) * s * 0.78, ey = y + Math.cos(fa) * s * 0.78;
+            ctx.moveTo(bx, by);
+            ctx.quadraticCurveTo(ex + Math.sin(a) * s * 0.18, ey + Math.cos(a) * s * 0.18, ex, ey);
+            ctx.quadraticCurveTo(x + Math.sin(a) * s * 0.28 + Math.sin(a + Math.PI / 2) * s * 0.32, y + Math.cos(a) * s * 0.28 + Math.cos(a + Math.PI / 2) * s * 0.32, bx, by);
+            ctx.closePath();
+        }
+        ctx.fillStyle = col; // AFTER restore — the fix that un-lemons the hand
+        ctx.fill();
+        return;
+    }
+    // ── 100-JUDGE VISUAL AUDIT (Phase 1) — THE OPEN PALM ──
+    // Five glyphs now: mitten, point, fist/count, OPEN, PINCH. The open palm
+    // is the hero-scale resting/presenting hand: a palm wedge whose FOUR
+    // fingers leave the mass as separated taper strokes (roots buried in the
+    // wedge, tips fanned on the re-grip clock) plus the thumb lobe. At rig ≥ 2
+    // the hand is ~44px on a 1080p frame — 5px fingers survive the transcode;
+    // the splay reads as a hand, not a paddle.
+    if (mode === 'open') {
+        const fa = a;
+        const pxn = Math.sin(fa + Math.PI / 2), pyn = Math.cos(fa + Math.PI / 2);
+        // the palm wedge — slightly longer than the mitten mass, the fingers'
+        // shared root (one subpath of the same filled path)
+        // B2 RE-SPEC (Visual Quality Audit — the palm that never was): the
+        // wedge path was built inside save/translate/rotate and then DISCARDED
+        // by the fingers' own beginPath — the open hand rendered as four
+        // floating finger strokes with a hole where the palm belongs (the
+        // detached-ring read at side rigs). The wedge now FILLS in its own
+        // transform, before the fingers layer over it.
+        // P1 U2 (Visual Quality Audit §4.1 — HANDS THAT CAN ACT): the palm is
+        // floored at 20 SCREEN px and the fingers clamp to the 5–7px band —
+        // the audit's own numbers. The old math (s*1.04 wide, w0 floored at
+        // 7/rigScale) gave a 18.7px palm and 4.7px fingers at rig 1.5 —
+        // under every floor the audit set, so working hands read as blobs.
+        // The whole glyph lifts to the palm floor so the hand stays
+        // proportionate (lengths ride the same unit).
+        const hs = Math.max(s, 20 / 1.04);
+        ctx.save();
+        ctx.translate(x + Math.sin(fa) * hs * 0.30, y + Math.cos(fa) * hs * 0.30);
+        ctx.rotate(fa);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        (0, theme_1.roundRect)(ctx, -hs * 0.52, -hs * 0.40, hs * 1.04, hs * 0.82, hs * 0.32);
+        ctx.fill();
+        ctx.restore();
+        // four separated fingers — the count glyph's PROVEN finger path (roots
+        // buried in the wedge, quadratic-capped tips, fan ±0.30 rad breathing
+        // with the re-grip clock); drawn as ONE path so the union silhouette
+        // stays a single hand at every angle
+        ctx.beginPath();
+        for (let f = 0; f < 4; f++) {
+            const off = (f - 1.5) * 0.20 * grip;
+            const ffa = fa + off;
+            const bx = x + Math.sin(fa) * hs * 0.48 + pxn * off * hs * 1.1;
+            const by = y + Math.cos(fa) * hs * 0.48 + pyn * off * hs * 1.1;
+            const ex = x + Math.sin(ffa) * hs * 1.10, ey = y + Math.cos(ffa) * hs * 1.10;
+            const px2 = Math.sin(ffa + Math.PI / 2), py2 = Math.cos(ffa + Math.PI / 2);
+            const w0 = Math.min(7, Math.max(hs * 0.19, 5)), w1 = Math.min(4.5, Math.max(hs * 0.13, 3.2)), dx2 = Math.sin(ffa), dy2 = Math.cos(ffa);
+            ctx.moveTo(bx - px2 * w0, by - py2 * w0);
+            ctx.lineTo(ex - px2 * w1, ey - py2 * w1);
+            ctx.quadraticCurveTo(ex + dx2 * w1 * 0.9, ey + dy2 * w1 * 0.9, ex + px2 * w1, ey + py2 * w1);
+            ctx.lineTo(bx + px2 * w0, by + py2 * w0);
+            ctx.closePath();
+        }
+        ctx.fillStyle = col;
+        ctx.fill();
+        // the thumb lobe — the mitten's own grammar, one bump on the wrist side
+        taper(ctx, x + Math.sin(fa) * hs * 0.14, y + Math.cos(fa) * hs * 0.14, x + Math.sin(fa + 1.1) * hs * 0.72, y + Math.cos(fa + 1.1) * hs * 0.72, hs * 0.26, hs * 0.14, col);
+        return;
+    }
+    // ── THE PINCH  // ── THE PINCH — "let me show you exactly this" ──
+    // The hero-scale count-one gesture: index curls forward to meet the
+    // thumb tip (the teardrop loop at the tips reads as the precise hold),
+    // the remaining three fingers stay folded (knuckle scallops), the mass
+    // carries the volume. The gesture a presenter makes ON a detail.
+    if (mode === 'pinch') {
+        const fa = a;
+        // the folded mass — stops at the palm; the three folded fingers leave
+        // it as separate bars with gaps (the pre-inked breaks)
+        // B2 RE-SPEC (Visual Quality Audit — the same discarded-path bug the
+        // wedge had): the mass path was built inside save/translate/rotate and
+        // then DISCARDED by the restore — the pinch rendered as a bare curled
+        // index + the stroked loop ("the detached-ring read"). The mass now
+        // FILLS in its own transform, under the index curl.
+        ctx.save();
+        ctx.translate(x + Math.sin(fa) * s * 0.08, y + Math.cos(fa) * s * 0.08);
+        ctx.rotate(fa);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        (0, theme_1.roundRect)(ctx, -s * 0.4, -s * 0.34, s * 0.62, s * 0.7, s * 0.26);
+        if (rigScale >= 1.25) {
+            for (const fy of [-0.2, -0.02, 0.16]) {
+                rrSub(ctx, s * 0.02, fy * s, s * 0.4, s * 0.13, s * 0.05);
+            }
+        }
+        ctx.fill();
+        ctx.restore();
+        // the index — curls from the mass to the pinch point (1.0s out)
+        taper(ctx, x + Math.sin(fa) * s * 0.18, y + Math.cos(fa) * s * 0.18, x + Math.sin(fa) * s * 0.86, y + Math.cos(fa) * s * 0.86, s * 0.22, s * 0.13, col);
+        // the pinch loop — the thumb meets the index tip: a small ring, the
+        // held-nothing circle that reads "this exact thing" at close-up
+        const tx = x + Math.sin(fa) * s * 0.98, ty = y + Math.cos(fa) * s * 0.98;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = s * 0.13;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.ellipse(tx, ty, s * 0.16, s * 0.19, fa, 0, Math.PI * 2);
+        ctx.stroke();
+        // (the folded finger bars live in the mass path above — the old
+        // knuckle-dot pair retired with the pre-inked break rebuild)
+        return;
+    }
+    // ── THE MITTEN — the film's single resting AND presenting hand ──
+    // PHASE-1 (100-judge report §11 Phase 1): ONE hand language at every
+    // scale. The tier split (splay fan above, compact mitt below) is
+    // RETIRED — the mitten IS the hand everywhere: a rounded palm mass
+    // plus ONE thumb lobe, one filled path, zero finger strokes (individual
+    // fingers are sub-feed-pixel below the close-ups anyway; the point and
+    // count glyphs carry the articulation). PHASE-1 also thickens the palm
+    // mass ~30% (1.0s → 1.3s across the axis) so a raised hand has real
+    // mass against the sky.
+    // PHASE-5 FIX (D-09 — THE LEMON HANDS, root cause): the palm mass was
+    // built inside save/translate/rotate with fillStyle=col, then filled
+    // AFTER restore() — restore pops fillStyle back to the caller's last
+    // fill (rolled sleeve #A8851B, scarf gold, gold numerals), so the
+    // mitten inherited whatever gold the scene had just laid down. Every
+    // close-up hand in the host-lead and cast frames rendered as a gold
+    // lemon with an ink thumb notch — the craft board's "the worst
+    // betrayal". The fill now runs after restore with col set explicitly:
+    // the hand is INK, the documented one-ink language, at every call site.
+    ctx.save();
+    ctx.translate(x + Math.sin(a) * s * 0.4, y + Math.cos(a) * s * 0.4);
+    ctx.rotate(a);
+    ctx.beginPath();
+    (0, theme_1.roundRect)(ctx, -s * 0.65, -s * 0.46, s * 1.3, s * 0.98, s * 0.44);
+    ctx.restore();
+    // PHASE-5 (D-09 — ARTICULATION): at close-up rig scales (host 2.65,
+    // cast 1.45+) the plain capsule silhouette reads as a lemon. Three
+    // finger scallops on the leading edge — arcs sharing the capsule's
+    // clockwise winding, unioned by nonzero fill — turn the silhouette
+    // into bump-and-notch knuckles: a hand, not a fruit, on any plane
+    // (no interior lines to survive or die at feed scale).
+    if (rigScale >= 1.25) {
+        const fxc = x + Math.sin(a) * s * 0.58, fyc = y + Math.cos(a) * s * 0.58;
+        const pxs = Math.sin(a + Math.PI / 2), pys = Math.cos(a + Math.PI / 2);
+        for (const f of [-1, 0, 1]) {
+            const sx = fxc + pxs * f * 0.28 * s, sy = fyc + pys * f * 0.28 * s;
+            const fr = s * 0.15;
+            ctx.moveTo(sx + Math.sin(a) * s * 0.14 + fr, sy + Math.cos(a) * s * 0.14);
+            ctx.arc(sx + Math.sin(a) * s * 0.14, sy + Math.cos(a) * s * 0.14, fr, 0, Math.PI * 2);
+        }
+    }
+    // the thumb lobe — a rounded bump on the wrist side, one subpath
+    {
+        const fa = a + 1.05;
+        const bx = x + Math.sin(a) * s * 0.4, by = y + Math.cos(a) * s * 0.4;
+        const ex = x + Math.sin(fa) * s * 0.78, ey = y + Math.cos(fa) * s * 0.78;
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(ex + Math.sin(a) * s * 0.18, ey + Math.cos(a) * s * 0.18, ex, ey);
+        ctx.quadraticCurveTo(x + Math.sin(a) * s * 0.30 + Math.sin(a + Math.PI / 2) * s * 0.32, y + Math.cos(a) * s * 0.30 + Math.cos(a + Math.PI / 2) * s * 0.32, bx, by);
+        ctx.closePath();
+    }
+    ctx.fillStyle = col; // AFTER restore — the fix that un-lemons the hand
+    ctx.fill();
+    return;
+}
+/**
+ * PHASE 2 VISUAL AUDIT (Fix 5) — THE FOLLOW-THROUGH CHAIN.
+ *
+ * A 3-node verlet chain (root pinned, two free nodes) — the classic-
+ * animation follow-through layer: when the body (or its clocks) move, the
+ * scarf cloth and the hair crest LAG, overshoot and settle with real
+ * physics instead of tracking a rigid sine. CHEAP + DETERMINISTIC: the
+ * chain replays a fixed 60ms-step verlet integration over a 480ms window
+ * ending at the current frame, seeded analytically from the rest pose —
+ * a pure function of (t, anchor trajectory), so frame-scrubbing is exact
+ * (no integrator state ever carries across frames; 8 steps × 2 nodes ×
+ * 2 constraint relaxations ≈ nothing on the render budget).
+ *
+ * Integration is textbook position-verlet: p' = p + (p − pPrev)·damp +
+ * g·dt², then two relaxation passes enforce the bone lengths with the
+ * root pinned to the anchor.
+ */
+function followChain(t, seed, anchor, restDir, // unit rest direction from the root
+seg1, seg2, // bone lengths
+gravX, gravY, // gravity accel (px/ms²)
+damp = 0.9) {
+    const DT = 60, STEPS = 8;
+    const t0 = t - DT * STEPS;
+    const a0 = anchor(t0);
+    // seed: nodes at their rest extension — zero initial velocity
+    let n1 = { x: a0.x + restDir.x * seg1, y: a0.y + restDir.y * seg1 };
+    let n2 = { x: n1.x + restDir.x * seg2, y: n1.y + restDir.y * seg2 };
+    let o1x = n1.x, o1y = n1.y, o2x = n2.x, o2y = n2.y;
+    for (let i = 0; i < STEPS; i++) {
+        const a = anchor(t0 + (i + 1) * DT);
+        const n1x = n1.x + (n1.x - o1x) * damp + gravX * DT * DT;
+        const n1y = n1.y + (n1.y - o1y) * damp + gravY * DT * DT;
+        const n2x = n2.x + (n2.x - o2x) * damp + gravX * DT * DT;
+        const n2y = n2.y + (n2.y - o2y) * damp + gravY * DT * DT;
+        o1x = n1.x;
+        o1y = n1.y;
+        n1 = { x: n1x, y: n1y };
+        o2x = n2.x;
+        o2y = n2.y;
+        n2 = { x: n2x, y: n2y };
+        // constraints — root pinned, both bones lengthed (2 relaxations)
+        for (let it = 0; it < 2; it++) {
+            let dx = n1.x - a.x, dy = n1.y - a.y;
+            let dl = Math.hypot(dx, dy) || 1e-6;
+            n1.x = a.x + dx / dl * seg1;
+            n1.y = a.y + dy / dl * seg1;
+            dx = n2.x - n1.x;
+            dy = n2.y - n1.y;
+            dl = Math.hypot(dx, dy) || 1e-6;
+            const c = (dl - seg2) / dl * 0.5;
+            n2.x -= dx * c;
+            n2.y -= dy * c;
+        }
+    }
+    return [n1, n2];
+}
+/**
+ * PANEL-12 / P0-4 (report §12.4) — the scarf becomes FABRIC.
+ *
+ * AUDIT-ROUND-2 (fix 7 — SCARF AS ONE RIBBON): the two-layer offset pair
+ * (ribbon(0,+3,under) over ribbon(+3,0,top)) — the fake two-tone
+ * underside — rendered as visible parallel seams; the panel read them as
+ * "overlapping translucent gold rectangles with visible seam edges… a
+ * rendering glitch rather than draped cloth" and elsewhere "bandana
+ * clip-art, zero folds". ONE continuous tapered ribbon now (6.5 root →
+ * 5.0 fold → 2.8 tip full widths, round caps at every joint), ONE fold
+ * crease at the fold point (the only seam a real scarf has), ONE
+ * under-shadow stroke where the tail passes under the knot's edge. The
+ * two-tone underside survives as the crease + under-shadow — fabric over
+ * fabric — never as an offset ghost pair.
+ */
+function scarfTail(ctx, x0, y0, // below the knot
+wave, // kept for the crease/under-shadow alignment
+colTop, colUnder, 
+/** PHASE 2 (Fix 5): the follow-through chain context — the tail's fold
+ *  and tip are the free nodes of a 3-node verlet chain (root pinned to
+ *  the knot), so the cloth LAGS the body's clocks and settles with real
+ *  physics. t/seed drive the anchor trajectory; walkMul/talkMul scale
+ *  the anchor's motion register exactly like the old wave0 did. */
+t = 0, seed = 0, walkMul = 1, talkMul = 1) {
+    // P1 scarf v3 (100-judge dossier): the old 42/33/21-unit chest-length
+    // ribbon hung DOWN the front of the gold torso and merged with it — the
+    // panel read "a gold bib". The tail is now a SHORT ribbon that escapes
+    // BACKWARD past the shoulder line (root 14, fold 9, tip 5 units) and is
+    // drawn BEFORE the torso, so the body occludes the root and only the
+    // flick beyond the back edge shows: cloth WORN around the neck, not a
+    // pendant slab. One fold crease; the under-shadow retires with the bib.
+    // PHASE 2 (Fix 5): fold/tip come from the chain (rest direction
+    // back-down, 21/21-unit bones, cloth gravity, damping 0.86) — the tail
+    // flicks, overshoots and settles instead of tracking the sine rigidly.
+    const anchor = (ti) => ({
+        x: x0 + Math.sin(ti / 700 + seed) * 7 * walkMul,
+        y: y0 + Math.sin(ti / 240 + seed * 2) * 3 * talkMul + (walkMul > 1 ? Math.sin(ti / 140) * 2.5 : 0),
+    });
+    // FP0 (Verdict P0 — SIGNATURE SILHOUETTE): the tail lengthens 1.5x
+    // (bones 21 -> 31.5) so the gold flick escapes visibly BEYOND the
+    // shoulder line at every rig — the brand accessory finally reads at
+    // feed scale. Root widths rise a step so the longer ribbon keeps mass.
+    // B3 RE-SPEC (Visual Quality Audit §3.1 — THE STRAP READ): the 63-unit,
+    // 15-unit-root tail rendered as a two-inch band from the left shoulder
+    // down across the chest — the panel's "slung messenger-bag strap /
+    // sash worn wrong". A scarf's tail is a SHORT cloth flick that leaves
+    // the knot at SHOULDER height and travels BACK, never down the chest:
+    // the rest direction flattens (back-horizontal, slight droop), the
+    // bones shorten to 17/14, and the ribbon thins to 8.5→3.2 units — the
+    // flick stays at the shoulder line, the knot + collar carry the brand,
+    // and the strap read is geometrically impossible.
+    const rl = Math.hypot(14, 5);
+    const [fp, tp] = followChain(t, seed, anchor, { x: -14 / rl, y: 5 / rl }, 17, 14, -0.0002, 0.0011, 0.86);
+    const fxp = fp.x, fyp = fp.y; // the fold — chain node 1
+    const ex = tp.x, ey = tp.y; // the tip — chain node 2
+    // ONE continuous tapered ribbon — root segment then fold segment,
+    // round caps at the fold so the crease reads as cloth bending.
+    taper(ctx, x0, y0, fxp, fyp, 8.5, 6, colUnder);
+    taper(ctx, fxp, fyp, ex, ey, 6, 3.8, colUnder);
+    taper(ctx, x0, y0, fxp, fyp, 7.2, 5, colTop);
+    taper(ctx, fxp, fyp, ex, ey, 5, 3.2, colTop);
+    // the fold crease — the one seam a real scarf HAS (the two-tone hint
+    // at the bend, in the under colour)
+    ctx.strokeStyle = (0, theme_1.rgba)(colUnder, 0.85);
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(fxp - 3, fyp - 1.2);
+    ctx.lineTo(fxp + 3, fyp + 1.2);
+    ctx.stroke();
+}
+/**
+ * v2 ground shadow — layered radial (contact core + ambient ring) + a short
+ * gold "stage" line. Replaces the single flat ellipse.
+ * PANEL-12 / P3-3: the soft ellipse offsets (−4, 0) — the ONE-LIGHT rule
+ * (light from upper right, every shadow in the film falls lower-left).
+ * PANEL-12 / P3-2: `skewX` lets perspective-floor scenes (aiDatacenter)
+ * shift the soft ellipse toward the floor's vanishing point so the host
+ * stands IN the room's perspective, not on a decal. The contact core and
+ * stage line stay under the feet.
+ * AUDIT-ROUND-2 (fix 22 — CONTACT CORE): the old radial peaked at 0.30 —
+ * the panel twice read the figure as FLOATING ("feet slightly float
+ * above the gold ellipse"). The K's shadow language arrives for the
+ * character too: a TIGHTER core (0.45 alpha, harder falloff) plus a
+ * CRISP contact line under the feet — contact, not blur.
+ */
+function groundShadowV2(ctx, cx, groundY, scale, skewX = 0, rot = 0) {
+    ctx.save();
+    ctx.translate(cx, groundY);
+    ctx.scale(scale, scale);
+    // AUDIT-2 / §10.2: `rot` rotates the whole shadow rig to a scene's
+    // ground slope (the ownerWorker owner stands ON a rising line — his
+    // shadow now lies on the same plane as his footing instead of a third
+    // phantom plane).
+    if (rot !== 0)
+        ctx.rotate(rot);
+    // the ambient ring — the soft outer claim on the floor (kept, smaller)
+    // 100-JUDGE REPORT fix C2: shadow mass deepens (ambient 0.45 → 0.52).
+    const g = ctx.createRadialGradient(-4 + skewX, 4, 6, -4 + skewX, 4, 88);
+    g.addColorStop(0, (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.52));
+    g.addColorStop(0.5, (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.17));
+    g.addColorStop(1, (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(-4 + skewX, 7, 86, 17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // the CRISP contact line — the tight dark line the K's shadow already
+    // has, right under the feet (±40px): the anchor that kills the float.
+    // 100-JUDGE REPORT fix C2: contact line 0.58 → 0.68, 4.2 → 4.6.
+    ctx.strokeStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.68);
+    ctx.lineWidth = 4.6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-40, 10);
+    ctx.lineTo(40, 10);
+    ctx.stroke();
+    // 100-JUDGE PANEL REPORT (fix B1 — ONE GROUND LANGUAGE): the ground
+    // system merges to THREE elements — the ambient radial patch, the crisp
+    // contact line, and one short horizon tick. Retired here:
+    //   • the vertical 'puddle' gradient ellipse (a second soft mass hanging
+    //     BELOW the contact line — the hovering-over-a-puddle double shadow);
+    //   • the ±130 soft stage line (a grey rule running through the shadow).
+    // PANEL ACCEPTANCE (audit FIX 3 — THE SKATEBOARD LINE, FINAL): the ±34
+    // GOLD stage tick is retired at EVERY scale, including the background
+    // rigs (≤1.2) where the previous round re-located it at whisper alpha —
+    // the brief named this element and the re-render still read it as the
+    // deck under background figures. The ground language is now exactly the
+    // three-value system above; the brand's floor mark lives in the chapter
+    // cards, not under feet.
+    ctx.strokeStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.22);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-70, 8);
+    ctx.lineTo(70, 8);
+    ctx.stroke();
+    // VAULT NOIR v3 — THE FLOOR LIGHT: the glass floor RETURNS light under
+    // the figure — one soft brass ellipse (the night stage's reflection).
+    // This is what separates the vault from a flat black void.
+    const u = ctx.createRadialGradient(6 + skewX, 9, 4, 6 + skewX, 9, 60);
+    u.addColorStop(0, (0, theme_1.rgba)(theme_1.PALETTE.gold, 0.14));
+    u.addColorStop(1, (0, theme_1.rgba)(theme_1.PALETTE.gold, 0));
+    ctx.fillStyle = u;
+    ctx.beginPath();
+    ctx.ellipse(6 + skewX, 10, 62, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+/**
+ * drawStickmanV2 — drop-in visual upgrade of drawStickman() (same call sites).
+ * Skeletal math is unchanged (poses still come from Stickman.poseAt), so all
+ * existing scenes, walk cycles and gesture blends keep working.
+ * v3: `talk` (0..1 mouth openness envelope, panel P0-4) — pass
+ * `g.speaking ? talkAt(g.beatT, g.wordTimes) : 0` at host call sites.
+ */
+function drawStickmanV2(ctx, cx0, groundY0, scale, t, r, seed = 0) {
+    const pose0 = r.pose;
+    const alpha = r.alpha ?? 1;
+    if (alpha <= 0.001)
+        return;
+    // PHASE 3 (Composition & value): arm the drawn-bbox tracker — the joint
+    // sites below touch it; a subject registers its frame-area occupancy at
+    // the end of the draw.
+    bbReset();
+    const isSubject = r.subject === true;
+    // AUDIT-2 / 1.1: arm the boil clock for this draw — every limb2() call
+    // from here down jitters on the quantized 3-phase clock (pure function of
+    // t, so scrub-determinism survives).
+    // P2-6: mid-gesture-spring (smear > 0.45) drops the boil to on-twos at
+    // half amplitude — the smear trail carries the motion, the jitter must
+    // not strobe against it at the 30fps phone gate.
+    // AUDIT-ROUND-3 (Fix 1): the rig scale rides in so the SCREEN-space
+    // wobble caps at 4px at any staging.
+    boilReset(t, (r.smear ?? 0) > 0.45, scale);
+    // AUDIT-3 / §2.4 (report Phase 2.4 — SQUASH ON LANDINGS): 0..1 body
+    // squash about the ground contact (feet stay planted, everything above
+    // compresses 6% and widens 5% — volume-preserving). Driven by a short
+    // decaying pulse at slam/landing times. Applied inside the figure
+    // transform stack below, after translate(cx, groundY). Pure function of
+    // caller data.
+    const squash = r.squash ?? 0;
+    // PANEL ACCEPTANCE (audit FIX 6): the launch stretch rides the same
+    // transform stack (see the scale call below the squash).
+    const stretch = Math.min(1, r.stretch ?? 0);
+    // BLUEPRINT Phase 2: the jaw multiplier reaches the mouth (the shock
+    // reaction's 2x gasp).
+    const jaw2x = r.jaw2x ?? 1;
+    // P2-4 (audit Table 4 — DEPTH WITH INTENT): "raise parallax to 0.55 on
+    // 2-3 hero moments". The default differential stays 0.40 (the
+    // certified phone-gate register); hero moments (the reaction close-ups,
+    // the cold-open shock) pass 0.55 — the figure visibly separates from
+    // its stage exactly when the frame is about the figure.
+    let cx = cx0;
+    let groundY = groundY0;
+    if (r.parallax) {
+        const pAmt = r.parallaxAmt ?? 0.4;
+        cx += effects_1.camState.dx * pAmt;
+        groundY += effects_1.camState.dy * pAmt;
+    }
+    // ── P2 (100-judge audit §13 — KILL THE RUBBER ARM) ──────────────────────
+    // When a scene asks the near hand for a target beyond the figure's natural
+    // arm span, the old solve straightened the arm toward it (the rubber read
+    // on the chartTwin reach). The premium solve: the ROOT STEPS TOWARD THE
+    // DATA — up to 85% of the excess distance, capped so staging stays honest —
+    // and the residual target is clamped to 94% of skeletal reach so the elbow
+    // keeps a visible bend at every distance. Registrations below move with
+    // the shifted root, so the guard stays exact.
+    if (r.contact) {
+        // rig skeleton literals (the rig constants below are declared after the
+        // body plan): legs 54+50, torso 78 → span proxy 182; arms 58+54 = 112.
+        const REACH = 1.0 * scale * 182 * 0.62;
+        const shSceneX0 = cx + (r.flip ? -1 : 1) * 4 * scale;
+        const shSceneY0 = groundY - 182 * scale;
+        const pdx = r.contact.x - shSceneX0;
+        const pdy = r.contact.y - shSceneY0;
+        const pdist = Math.hypot(pdx, pdy) || 1;
+        if (pdist > REACH) {
+            const pull = (pdist - REACH) / pdist;
+            const shift = (pdx / pdist) * (pdist - REACH) * 0.85;
+            const maxShift = REACH * 0.35;
+            cx += Math.max(-maxShift, Math.min(maxShift, shift));
+        }
+        void pdy;
+    }
+    // v9 (report P0-1 / D-02): register the figure's feet + ground-shadow
+    // envelope so the collision guard can assert the caption pill never
+    // plates a host's footing again. Shadow: rx 118, ry 26 centered at
+    // groundY+8 (groundShadowV2), feet within ±40px of cx at groundY.
+    // PLAYBOOK D3: the registration itself moved into the hostBody branch
+    // below (same-cls exemption); this block is the non-host default.
+    // v10.1 (panel 11 re-review): the feet-only envelope let the statCards
+    // host plate a stat card's number+tag unseen — the body above the feet
+    // was never registered. Full-body envelope (head to feet) as cls 'host'
+    // for opted-in callers; the guard checks it against every content rect.
+    // PREMIUM UPGRADE FIX 1b: envelope height 332 → 296 so the larger 2.6×
+    // figure's registered body bottom sits at groundY (not groundY+shadow),
+    // clearing the 2-row caption pill (pill top ≈ 732; envelope bottom = 670).
+    // The visual shadow + contact line still draw to their full extent below
+    // the feet; only the guard's certified envelope stops at the soles.
+    if (r.hostBody) {
+        // CONTACT VERBS: while a hand is planted on a scene object the certified
+        // body envelope narrows to the body core (the reaching arm is accounted
+        // for by the scene's declared contact + the hand's own rect). The sweep
+        // and the frame review are the referees of the full staging.
+        // P9 (SWEEP FIX, barsCompare @840s): the contact-mode envelope 70 rode
+        // the host's hip band 18.5px past the left frame edge (the "pill" in the
+        // sweep dump is the edge plane). The planted-hand envelope narrows to the
+        // BODY CORE (56 rig units — the drawn torso half-width + outline); the
+        // reaching arm stays accounted for by the contact rect, as the comment
+        // below always said.
+        const envHalf = r.contact ? 56 : 88;
+        // PANEL ACCEPTANCE (audit FIX 2 — THE TOP-EDGE RULE): the envelope is
+        // TWO BANDS, true to the drawn silhouette. ONE tall rect's top corners
+        // were empty air — at the 0.65 ground they grazed the 405px watermark
+        // band for ~360 phantom sweep violations. The HEAD band (±40 rig units:
+        // the head is ±24, the glasses temples ±33) owns the top 130 units —
+        // it is the band the top-edge rule and the watermark actually govern;
+        // the TORSO band (±88) owns the lower 152 units where arms and hips
+        // reach wide. Same plating guarantees, no phantom corners.
+        (0, collision_1.registerRect)(`hostBody@${Math.round(cx)},${Math.round(groundY)}`, cx - 40 * scale, groundY - 161 * scale, 80 * scale, 43 * scale, 'host');
+        // PHASE-3 (report §11 Phase 3): the head band follows the drawn
+        // silhouette — three widths, not one rectangle. The single ±40 rect's
+        // TOP-LEFT corner was empty air (the dome curves away): at the 2.65
+        // presenting scale that phantom corner plated the header logo's right
+        // edge on two walk beats — 21 sweep violations while the drawn head
+        // visibly cleared the text. The apex band (±17: the dome's top 30
+        // units are ±10-17 wide) clears the header at every certified camera
+        // state; the dome band (±26) and the temple band (±40) keep the
+        // glasses coverage below it.
+        (0, collision_1.registerRect)(`hostBodyDome@${Math.round(cx)},${Math.round(groundY)}`, cx - 26 * scale, groundY - 211 * scale, 52 * scale, 50 * scale, 'host');
+        (0, collision_1.registerRect)(`hostBodyApex@${Math.round(cx)},${Math.round(groundY)}`, cx - 17 * scale, groundY - 241 * scale, 34 * scale, 30 * scale, 'host');
+        // P4-hygiene (gate-truth fix): the wide torso band registers ONLY while
+        // the figure's core is inside the frame. During a walk-IN entrance the
+        // host legitimately crosses the frame edge (the sweep flagged the same
+        // 9 hip-band grazes at ~841s on every run); the band's job is caption-
+        // vs-body plating, which is meaningless for a figure still entering.
+        // The head bands (dome/apex) stay — they are the top-edge rule's bands.
+        if (cx > envHalf * scale + 2) {
+            (0, collision_1.registerRect)(`hostBodyHip@${Math.round(cx)},${Math.round(groundY)}`, cx - envHalf * scale, groundY - 118 * scale, envHalf * 2 * scale, 142 * scale, 'host');
+        }
+        // PLAYBOOK D3 (report §8.3): the same figure's own feet band must be
+        // EXEMPT from the host-vs-content pass by construction — the guard's
+        // containment skip only fires when the band is FULLY inside the body
+        // envelope; at P1's shorter legs the shadow band (which extends
+        // below groundY) pokes out and the guard flagged the figure against
+        // ITSELF 163 times in the sweep. The feet band of a hostBody figure
+        // registers with the noEdge-style exemption: same cls, never
+        // compared. (The band still asserts against the pill + fixed
+        // furniture checks above — only the host-vs-content self-check dies.)
+        // CONTACT VERBS: the feet band narrows with the body envelope (70·scale
+        // half-width) — a host planted on a scene object stands close enough
+        // that the full 122·scale band sweeps a registered object the body
+        // itself never touches (the guard caught exactly that on the
+        // datacenter's rack: 61px of phantom feet-band overlap).
+        // PANEL ACCEPTANCE: the band is also WALK-STATE aware — a standing host's
+        // feet span ±48 rig units, a walking stride ±80; the old constant ±122
+        // was phantom corner again (a standing host's band plated a low card the
+        // feet never approach — 69px sweep violations at 695s).
+        // PHASE-3 (report §11 Phase 3): the feet band's below-ground extension
+        // is re-tuned to the certified envelope at the 2.65 presenting scale:
+        // the drawn footprint (shadow fade tail) ends 24·scale below groundY;
+        // the band now ends 25·scale below — at the walk-contact dip (groundY
+        // ~730) the band bottom stays ≤ 799, inside the caption zone (800) that
+        // the sweep asserts. The old 48·scale height put the band bottom at
+        // groundY + 36·scale = 825 at the dip — 102 sweep violations.
+        const feetHalf = r.walkPhase !== undefined ? 80 : (r.contact ? 70 : 48);
+        (0, collision_1.registerRect)(`stickman@${Math.round(cx)},${Math.round(groundY)}`, cx - feetHalf * scale, groundY - 12 * scale, feetHalf * 2 * scale, 37 * scale, 'host');
+    }
+    else {
+        (0, collision_1.registerRect)(`stickman@${Math.round(cx)},${Math.round(groundY)}`, cx - 122 * scale, groundY - 12 * scale, 244 * scale, 48 * scale);
+    }
+    // AUDIT-ROUND-2 (fix 19 — the split draw): 'far' renders shadow + far
+    // limbs only; 'rest' renders from the near leg onward; 'all' (default)
+    // renders everything — the single-pass drop-in every existing call site
+    // keeps using. Both phases run the identical pose math.
+    const phase = r.phase ?? 'all';
+    const drawFar = phase === 'far' || phase === 'all';
+    const drawRest = phase === 'rest' || phase === 'all';
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, groundY);
+    // AUDIT-3 / §2.4: the squash rides the figure transform ABOUT the
+    // ground-contact origin (translate happens before scale, so the feet
+    // stay planted while the body compresses).
+    // PREMIUM UPGRADE M1: WALK WEIGHT. The contact squash rises from 6% to
+    // the panel's amplitude register: 18% vertical (volume-preserving pair:
+    // width +15%). The figure visibly compresses at each foot plant — the
+    // walk gains weight. The old 6% was below perception at the phone gate.
+    // PHASE 1.2 (panel audit — 12-18% AT THE FEED): the vertical register is
+    // 18% MAX — the shipped 0.22 sampled 20.5% at 30fps (the audit's band is
+    // 12-18%), so the coefficient lands exactly on the register; sampled
+    // foot-plants now measure 15-17%.
+    // PHASE 2 VISUAL AUDIT (Fix 4 — WALK AMP AT FEED SCALE): the 18% register
+    // was calibrated at hero scale; at the feed rigs (0.75-1.1) the sampled
+    // squash samples to 2-5px — invisible at 320px. The amplitude is now
+    // scale-conditioned: full register at scale ≥ 1.4 (hero frames
+    // unchanged), +30% at 1.0, +40% (floor) at ≤ 0.9 — closed form, so the
+    // walkStrike/walkPush pulses read as squash-and-stretch at the phone
+    // gate instead of dissolving.
+    const walkAmp = Math.min(1.4, Math.max(1, 1 + Math.max(0, 1.4 - scale) * 0.75));
+    if (squash > 0.001)
+        ctx.scale(1 + 0.15 * squash * walkAmp, 1 - 0.18 * squash * walkAmp);
+    // B12: the follow-through half — negative squash = the stretch
+    // overshoot (the body rebounds past neutral then settles). Same
+    // volume-preserving pair about the ground origin.
+    else if (squash < -0.001)
+        ctx.scale(1 - 0.09 * -squash * walkAmp, 1 + 0.11 * -squash * walkAmp);
+    // PANEL ACCEPTANCE (audit FIX 6 — STRETCH ON LAUNCH): the missing half of
+    // the pair. Volume-preserving elongation about the same ground origin:
+    // height +6%, width −5% at full stretch — two frames of reach on every
+    // gesture launch and step push-off (amplitude rides the same
+    // scale-conditioned walkAmp register).
+    if (stretch > 0.001)
+        ctx.scale(1 - 0.05 * stretch * walkAmp, 1 + 0.06 * stretch * walkAmp);
+    ctx.scale(r.flip ? -scale : scale, scale);
+    // v6 idle life: a 2.4s breath sway (±0.23°) around the ground contact —
+    // the freeze between sentences read as a mannequin without it.
+    ctx.rotate(Math.sin(t / 2400 + seed * 1.7) * 0.004);
+    // v10 (panel CHAR-2): WEIGHT SHIFT — a slow 4.6s hip settle.
+    // AUDIT-3 / §2.2 (report Phase 2.2 — CONTRAPPOSTO IDLE): the terms were
+    // sub-pixel at phone scale (±1.8px at scale 1.0), which is why the
+    // BEFORE renders still read “mannequin between sentences”. 
+    // BLUEPRINT Phase 1 (report Table 7): the idle register rises to the
+    // panel's numbers — weight ±7.5px (AMP.weightShift) driving a ±4.0°
+    // shoulder counter (AMP.shoulderCounterDeg). Hips and shoulders oppose
+    // each other on a line a phone viewer can finally SEE.
+    // PLAYBOOK M5 (report §8.2 — THE BREATH-HOLD): constant life reads as
+    // simulation. Every 3rd weight cycle (a 13.8s clock) the idle terms
+    // drop 60% for one cycle — the contrast makes the alive cycles read
+    // as alive. Pure function of t; scrub-safe.
+    const holdCycle = ((t / 4600 + seed * 0.31) % 3) / 3; // 0..1 within the 3-cycle group
+    // PHASE 3 (audit §8 — HOLD-LIFE RE-RAISE): the quiet-cycle dip 0.4 -> 0.8.
+    // At 0.4 the third of every three weight cycles fell under the feed's
+    // static-perception floor — the audit measured "a breathing statue". 0.8
+    // keeps the CONTRAST (the alive cycles read as alive) without dying.
+    const holdK = holdCycle > 0.667 ? 0.8 : 1; // the last cycle of every 3 runs quieter
+    const weight = Math.sin(t / 4600 + seed * 2.3) * perception_1.AMP.weightShift * holdK;
+    const counter = Math.sin(t / 4600 + seed * 2.3) * holdK;
+    ctx.translate(weight, 0);
+    ctx.rotate(Math.sin(t / 6200 + seed * 0.9) * 0.003);
+    // the pose-level contrapposto offsets (applied on a COPY — callers'
+    // pose objects are never mutated)
+    // PANEL ACCEPTANCE (audit FIX 5 — THE RE-GRIP): a slow 3.1s finger flex
+    // shared by both hands (phase-shifted per seed). Between sentence springs
+    // the hands never freeze as rigid glyphs — the fingers breathe.
+    const grip = 1 + 0.16 * Math.sin(t / 3100 + seed * 2.1);
+    const pose = {
+        ...pose0,
+        lAU: pose0.lAU - counter * perception_1.AMP.shoulderCounterDeg,
+        rAU: pose0.rAU + counter * perception_1.AMP.shoulderCounterDeg,
+    };
+    // BLUEPRINT Phase 2: the two rotation terms the rig never had —
+    // PELVIS TILT (the hip line tilts; the torso grows from the tilted
+    // pelvis) and SHOULDER TILT (the shoulder anchors counter it). Walked
+    // figures carry them from walkPose; idle poses default to 0.
+    const hipT = (pose.pelvisTilt ?? 0) * D2R;
+    const shT = (pose.shoulderTilt ?? 0) * D2R;
+    // PANEL-12 / P0-5 (report §12.5): PROPORTIONS — shorter legs, bigger
+    // head, stockier torso. TORSO 96→88, U_LEG 72→64, L_LEG 66→58: the v2
+    // figure was 7.2 heads tall on pin legs — the panel read "coat hanger".
+    // The new stack is ~6.4 heads and reads "person". Head stroke 8→9 so
+    // the face keeps its ink weight at the shorter scale.
+    // PLAYBOOK P1 (report §8.1 — 5.0-5.2 HEADS): Becker-grade cartoon hosts
+    // run 4.5-5.5 heads with a chest nearly double the waist. Legs drop to
+    // 54/50, torso to 78 — the stack is now ~5.1 heads and the figure
+    // reads "a character" before "a stick". Chest rises below (17→22).
+    const U_LEG = 54, L_LEG = 50, TORSO = 78, U_ARM = 58, L_ARM = 54;
+    const pelvisY = -U_LEG - L_LEG + pose.rootY;
+    // BLUEPRINT Phase 2: the hip anchors ride the pelvis tilt — right hip
+    // rises when pelvisTilt is positive (weight onto the left leg), left
+    // hip drops; the torso grows from the tilted hip line (its lean picks
+    // up half the tilt) so the upper body answers the hips.
+    const hipRise = Math.sin(hipT) * 6.5;
+    const hipLX = -6 * Math.cos(hipT), hipRX = 6 * Math.cos(hipT);
+    const hipLY = pelvisY + hipRise, hipRY = pelvisY - hipRise;
+    const leanR2 = pose.lean * D2R + hipT * 0.5;
+    const leanR = leanR2;
+    const neckX = Math.sin(leanR2) * TORSO;
+    const neckY = (hipLY + hipRY) / 2 - Math.cos(leanR2) * TORSO;
+    // ground (v2 layered shadow; P3-2 skew + P3-3 one-light offset inside)
+    // AUDIT-ROUND-2 (fix 19): the shadow belongs to the FAR pass — it grounds
+    // the figure behind anything the caller interposes between the phases.
+    if ((r.shadow ?? 1) > 0 && drawFar)
+        groundShadowV2(ctx, 0, 0, 1, r.shadowSkew ?? 0, r.shadowRot ?? 0);
+    const ink = theme_1.PALETTE.ink;
+    // AUDIT-ROUND-3 (Fix 1 — ONE INK): the two-tone split (#3A4A45 far vs
+    // #1F3328 near, at different widths) was read by two independent
+    // judges as a rigging error — "the legs are two different widths with
+    // no knee articulation" / "an un-clipped alpha or a badly masked
+    // second limb". What was designed as atmospheric perspective read as
+    // a defect at both scales. Depth now comes from the WIDTH step alone
+    // (the INK register's far/near taper difference) plus overlap and the
+    // knuckle joints — ONE silhouette value per character, the Alan
+    // Becker rule the panel set as the reference standard.
+    const farInk = ink;
+    // AUDIT-3 / Walk 3.0 (§2.6): the shoe PITCHES with the stride (lToe/rToe
+    // from walkPose) — heel-strike (toe up) through toe-off (toe down).
+    // BLUEPRINT Phase 2 (report §11): the 18x8.5 ELLIPSE becomes a DRAWN
+    // WEDGE with a heel counter, instep and toe box. Rotates about the
+    // ankle; the sole rides the ground line.
+    // AUDIT-ROUND-2 (fix 12 — WALK EXTREMES): the lever lengthens 29 → 36px
+    // (AMP.shoeLeverPx) — the ±40° toe roll finally has a lever arm you can
+    // SEE at any host scale (the old 29px read as a paddle at 320px).
+    const shoeWedge = (f, col, rotDeg = 0) => {
+        ctx.save();
+        ctx.translate(f.ex, f.ey - 4);
+        ctx.rotate(rotDeg * D2R);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        // 100-JUDGE VISUAL AUDIT (Fix 1 — THE CLEAN WEDGE): the old four-curve
+        // blob (heel counter + toe cap + instep dips) read as a clown shoe at
+        // rest. One clean low wedge instead: a quiet heel curve, a straight
+        // sole, a single toe taper — the sneaker silhouette premium flats
+        // wear, readable as footwear at feed scale without the bubbles.
+        ctx.moveTo(-8.5, -3.2);
+        ctx.quadraticCurveTo(-11.5, 2, -8.2, 6.4);
+        ctx.lineTo(15.5, 7.6);
+        ctx.quadraticCurveTo(22.5, 7.4, 24.2, 4.6);
+        ctx.quadraticCurveTo(24.8, 1.6, 19.5, 0.6);
+        ctx.quadraticCurveTo(6, -1.8, -8.5, -3.2);
+        ctx.closePath();
+        ctx.fill();
+        // the sole line — a slightly darker pass under the wedge so the
+        // ground contact reads (one light, shadow tone)
+        ctx.strokeStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.55);
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(-8.2, 7);
+        ctx.quadraticCurveTo(7.4, 8, 22.4, 6);
+        ctx.stroke();
+        ctx.restore();
+    };
+    let farFoot = null;
+    // PHASE 2 cast props: the FAR hand's solved position, hoisted out of the
+    // far pass so the briefcase/lunchbox (drawn after the near arm) can ride it.
+    let farHandRef = null;
+    // PREMIUM UPGRADE C2: TORSO AS SHAPED CAPSULE. The single taper (a spine
+    // line that widens) is replaced with a filled path: chest bulge, waist
+    // narrowing, hip block, shoulder caps. The figure gains silhouette mass
+    // the camera can frame and the light can hit. A taper reads as a line;
+    // a capsule reads as a body.
+    // (100-JUDGE REPORT fix A3 hoisted the variant flags above the limbs —
+    // the rolled sleeves reference `prof` at the far-arm draw, which
+    // precedes the torso block.)
+    const prof = r.variant === 'prof';
+    // 100-JUDGE PANEL / Phase 1 item 4 — CAST BY SILHOUETTE: the worker's
+    // flat cap (report: "the worker gets a cap"). Drawn on the becker
+    // head's crown: a brim bar + a soft dome, both in the head's own ink
+    // with an ivory brim-edge line so the cap reads as a DIFFERENT
+    // silhouette at 320px — the ownerWorker pair becomes cast, not copies.
+    const worker = r.variant === 'worker';
+    if (drawFar) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // BLUEPRINT Phase 2 (report §11, INK register): the phone feed rewards
+        // DARK MASS on pale ground — limb weights rise so the figure carries
+        // the frame's identity at 320px (far leg 12/10/9 -> 17/13/10, far arm
+        // 9/8/7 -> 13/10/8).
+        farFoot = limb2(ctx, hipLX, hipLY, pose.lLU, pose.lLL, U_LEG, L_LEG, perception_1.INK.legFar[0], perception_1.INK.legFar[1], perception_1.INK.legFar[2], farInk, pose.lLift ?? 0, 1.14); // iter-3: knee mass
+        if (farFoot)
+            bbTouch(farFoot.ex, farFoot.ey, 24); // PHASE 3 bbox: far shoe
+        // 100-JUDGE AUDIT (Part 9.3 — COUNTER-ARM SECONDARY MOTION). When the
+        // near arm gestures (smear > 0), the far arm should counter-balance —
+        // a small opposite-direction movement that maintains body balance.
+        // Premium character animation never freezes the off-arm; it answers
+        // the gesture. The counter is 40% of the near arm's accent, opposing
+        // direction — body balance reads as "a real gesture", not "a pose".
+        const counterSmear = (r.smear ?? 0) * 0.40;
+        const farAU = pose.lAU + counterSmear * 8; // small upward counter
+        const farAL = pose.lAL - counterSmear * 12; // small outward counter
+        const farHand = limb2(ctx, neckX - 4 + Math.sin(shT) * -4, neckY + 3 + Math.sin(shT) * 9 - (pose.shoulderDrop ?? 0) * 0.6, farAU, farAL, U_ARM, L_ARM, perception_1.INK.armFar[0], perception_1.INK.armFar[1], perception_1.INK.armFar[2], farInk, 0, 0.92); // iter-3: elbow mass
+        farHandRef = farHand;
+        bbTouch(farHand.ex, farHand.ey, 18); // PHASE 3 bbox: far hand glyph
+        // 100-JUDGE PANEL REPORT (fix A3 — THE ROLLED SLEEVE, far arm): the
+        // torso gold runs out mid-upper-arm in a slightly wider #A8851B band —
+        // the silhouette reads "gold workshirt with pushed-up sleeves" over an
+        // ink arm, not a bare mustard capsule. Drawn UNDER the torso (before
+        // it), so the sleeve root tucks into the shoulder like real clothing.
+        if (!prof) {
+            // 100-JUDGE VISUAL AUDIT (Fix 1 — THE STAIN CUFF): the rolled sleeve
+            // band was the vest's own gold a half-step darker (#A8851B) — it read
+            // as a stain ON the vest, not a fold of cloth. The cuff is now DEEP
+            // BRONZE (#6E5210), a full register darker than the shirt: the read is
+            // "gold workshirt, sleeves pushed up", with a clear cuff edge at feed.
+            taper(ctx, neckX - 4 + Math.sin(shT) * -4, neckY + 3 + Math.sin(shT) * 9 - (pose.shoulderDrop ?? 0) * 0.6, neckX - 4 + Math.sin(shT) * -4 + Math.sin(farAU * D2R) * U_ARM * 0.58, neckY + 3 + Math.sin(shT) * 9 - (pose.shoulderDrop ?? 0) * 0.6 + Math.cos(farAU * D2R) * U_ARM * 0.58, perception_1.INK.armFar[0] + 5, perception_1.INK.armFar[0] - 1, '#6E5210');
+        }
+        handGlyph(ctx, farHand.ex, farHand.ey, farAL, 15, farInk, scale, pose.lHand, grip); // PHASE-1: the far hand runs the same mitten glyph — one hand language at every scale
+        // AUDIT-2 / 0.1: the far shoe steps with its limb (farInk) — depth,
+        // not a second colour system.
+        shoeWedge(farFoot, farInk, pose.lToe ?? 0);
+        ctx.restore();
+    }
+    if (!drawRest) {
+        ctx.restore();
+        ctx.restore();
+        return;
+    }
+    // NEAR leg (support) — P0-3: both feet now get a shoe, slightly
+    // oversized and forward-set.
+    // BLUEPRINT Phase 2 (INK): near leg 15/12/10 -> 21/16/12 — the support
+    // leg is the figure's anchor mass.
+    const nearFoot = limb2(ctx, hipRX, hipRY, pose.rLU, pose.rLL, U_LEG, L_LEG, perception_1.INK.legNear[0], perception_1.INK.legNear[1], perception_1.INK.legNear[2], ink, pose.rLift ?? 0, 1.14); // iter-3: knee mass
+    bbTouch(nearFoot.ex, nearFoot.ey, 24); // PHASE 3 bbox: near shoe
+    shoeWedge(nearFoot, ink, pose.rToe ?? 0);
+    // 100-JUDGE PANEL / Phase 2 item 2 — LEG SMEARS ON THE RUN (report §6
+    // Phase 2, p.14: "allow leg smears on the run"). The arm smear draws
+    // ONE elongated mass along the swept arc (see the near-arm smear
+    // below); the LEG version uses the same grammar on the near leg: the
+    // swing leg reconstructs its position one stride-swing ago (rLL
+    // minus the swing amplitude) and ONE taper spans previous-foot →
+    // past-current-foot at 0.4 alpha. Fires only when the caller passes
+    // legSmear (the run's flight window / mid-stride events) — walks keep
+    // their planted-foot clarity, runs read as velocity.
+    if ((r.legSmear ?? 0) > 0.12) {
+        const lsm = (0, easing_1.clamp01)(r.legSmear ?? 0);
+        const aU4 = pose.rLU * D2R;
+        const aL4 = pose.rLL * D2R;
+        // the foot NOW
+        const fex = hipRX + Math.sin(aU4) * U_LEG + Math.sin(aL4) * L_LEG;
+        const fey = hipRY + Math.cos(aU4) * U_LEG + Math.cos(aL4) * L_LEG - (pose.rLift ?? 0);
+        // the foot a half-swing ago (the swing term the walk/run math adds)
+        const swingAgo = (aL4 - 34 * D2R * lsm);
+        const fpx = hipRX + Math.sin(aU4) * U_LEG + Math.sin(swingAgo) * L_LEG;
+        const fpy = hipRY + Math.cos(aU4) * U_LEG + Math.cos(swingAgo) * L_LEG;
+        // PHASE-5 FIX (D-09 — THE GRAY CLOUD): the single 0.26-alpha taper
+        // spanned the whole swept arc as ONE translucent mass — on stills it
+        // read as a gray cloud parked behind the leg, exactly the smear-ghost
+        // critique. The echo is now DRAWN: three thin speed-lines riding the
+        // arc's normal offsets, gaps between them, each tapered hard toward
+        // the trail — velocity carried by line structure (the Preston Blair
+        // speed-line convention), not by a translucent plank. Total ink is
+        // lower than the old mass; the motion read is stronger.
+        ctx.save();
+        const nxs = -(fey - fpy), nys = (fex - fpx);
+        const nl = Math.hypot(nxs, nys) || 1;
+        for (const k of [-1, 0, 1]) {
+            const off = k * 11;
+            ctx.globalAlpha = alpha * (k === 0 ? 0.30 : 0.20) * lsm;
+            taper(ctx, fpx + nxs / nl * off, fpy + nys / nl * off, fex + (fex - fpx) * 0.10 + nxs / nl * off, fey + (fey - fpy) * 0.10 + nys / nl * off, perception_1.INK.legNear[1] * 0.5, perception_1.INK.legNear[2] * 0.25, ink);
+        }
+        ctx.restore();
+    }
+    // PANEL-12 / P2-5 (report §14.5) — CONTACT DUST on foot-plant. Three
+    // motes per plant, 200ms life, shadow-color at 0.25 alpha, keyed to the
+    // walk phase (pure function of t — the ground participates in the walk).
+    if (r.walkPhase !== undefined) {
+        for (const c of [0, 0.5]) {
+            const age = (((r.walkPhase - c) % 1) + 1) % 1;
+            if (age >= 0.12)
+                continue;
+            const p = age / 0.12;
+            const foot = c === 0 ? nearFoot : farFoot;
+            if (!foot)
+                continue;
+            for (let k = 0; k < 3; k++) {
+                const h = (0, easing_1.hash01)(k * 7.3 + Math.floor(r.walkPhase * 2) * 13.1 + c * 100 + seed);
+                const dir = k === 0 ? -1 : k === 1 ? 1 : 0.3;
+                ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.25 * (1 - p));
+                ctx.beginPath();
+                ctx.arc(foot.ex + dir * (5 + 16 * p) * (0.5 + h * 0.5), foot.ey - 4 - 10 * p * h, 4 * (1 - p * 0.45), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+    // PREMIUM UPGRADE C2: TORSO AS SHAPED CAPSULE. The single taper (a spine
+    // line that widens) is replaced with a filled path: chest bulge, waist
+    // narrowing, hip block, shoulder caps. The figure gains silhouette mass
+    // the camera can frame and the light can hit. A taper reads as a line;
+    // a capsule reads as a body. (prof/worker declared above the limbs —
+    // see the A3 note.)
+    // P1 scarf v3 (100-judge dossier): the tail escapes BACKWARD past the
+    // shoulder and draws BEFORE the torso — the body occludes the root, the
+    // cloth reads as worn AROUND the neck, and the gold bib read dies. The
+    // wave is damped 0.5x: a short tail flicks, it does not whip.
+    if (r.scarf !== false && !prof) {
+        const talkEnv0 = r.talk ?? 0;
+        // PHASE-5 (report §11 Phase 5 — LET THE BODY ACT): the standing wave
+        // 6 -> 14px — at 6px the tail's flick was 1.8px at the 320px gate and
+        // the scarf read as a static bolt of cloth. At 14px (4.1px at feed) the
+        // wave REGISTERs: the scarf is worn, alive, brand-motion.
+        // B3 RE-SPEC: the short shoulder flick answers the body's clocks at a
+        // 10px register — cloth-alive without whipping a ribbon this short.
+        const wave0 = Math.sin(t / 700 + seed) * 10 * (r.walkPhase !== undefined ? 3.2 : 1) * (1 + talkEnv0 * 1.4) +
+            Math.sin(t / 240 + seed * 2) * 3.2 * talkEnv0;
+        // P1 U3 (RETIRE THE STRAP READ): at side rigs the tail is noise —
+        // the audit draws ONLY THE KNOT below the hero band. The gate rises
+        // 1.2 → 1.7: the flick exists at the hero/presenting registers where
+        // its 3.2px tip survives; below, the knot + collar break carry the
+        // brand (the knot draws at all scales — see the gold knot block).
+        if (scale >= 1.7) {
+            scarfTail(ctx, neckX - 3, neckY + 12, wave0 * 0.5, '#31436B', theme_1.PALETTE.gold, t, seed, r.walkPhase !== undefined ? 3.2 : 1, 1 + talkEnv0 * 1.4);
+        }
+        // (no sub-gate stroke: knot-only below 1.7, per the audit)
+    }
+    {
+        const tx0 = 0, ty0 = pelvisY + 4, tx1 = neckX, ty1 = neckY;
+        const tdx = tx1 - tx0, tdy = ty1 - ty0;
+        const tL = Math.hypot(tdx, tdy) || 1;
+        const tnx = -tdy / tL, tny = tdx / tL;
+        // half-widths at 4 key points: hips(0), waist(0.45), chest(0.75), shoulders(1.0)
+        // PREMIUM UPGRADE M4: CHEST BREATHING. The chest widens ±4% on a 2.4s
+        // breath cycle — the torso expands on inhale, narrows on exhale. Reads
+        // as breathing, not as a vertical bob. The shoulders also rise 2px on
+        // inhale (shoulderY offset below).
+        const chestBreathe = 1 + Math.sin(t / 2400 + seed * 3.1) * 0.04;
+        // PLAYBOOK P2 (report §8.1 — DRAWN OUTLINE, NOT A FILLED CAPSULE):
+        // Becker characters are read by their OUTLINES at 20px. Chest rises
+        // 17→22 (a 2:1 chest-to-waist read) and the whole mass gains a 3.5px
+        // ink outline path — the concave neck→trapezius→deltoid contour that
+        // makes a filled shape read as a drawn body.
+        // FP0 (Verdict P0 — TORSO +18%): the chest must read as a MASS at feed
+        // scale — every torso half-width rises 18% (chest 22 -> 26, waist
+        // 19 -> 22.4, prof widens with it) so the widened wedge carries the
+        // frame's dark-mass band at every rig.
+        const wH = prof ? 20.6 : 17.7, wW = prof ? 15.3 : 13;
+        const wC = (prof ? 28.3 : 26) * chestBreathe, wS = (prof ? 23.6 : 22.4) * chestBreathe;
+        const rX = (h, w) => tdx * h + tnx * w;
+        const rY = (h, w) => ty0 + tdy * h + tny * w;
+        const lX = (h, w) => tdx * h - tnx * w;
+        const lY = (h, w) => ty0 + tdy * h - tny * w;
+        // 100-JUDGE PANEL / Phase 1 item 1 — THE CHOSEN-ONE COLOR (report
+        // §6 Phase 1): "commit the host to a single silhouette color — the
+        // film already owns gold; a goldDeep body mass with ink joints reads
+        // premium and survives the feed." The host's torso mass becomes
+        // goldDeep (#8F6E12) — one owned color, registered as a constant
+        // (BODY_MASS) so every variant can reference the same identity.
+        // Becker head, hands, shoe wedges and limb strokes stay ink — the
+        // gold body is the thumbnail signature; ink keeps the joints, face
+        // and silhouette edges so contrast never collapses. The prof variant
+        // keeps its wider ink torso (a different PERSON — the coffee prof
+        // is not the brand).
+        // P1 (SIGNATURE IDENTITY): the torso mass draws in the dark bronze tee;
+        // the GOLD VEST panel (h 0.40..0.98, ~38% of torso height, 2px ink
+        // outline) layers over the chest, and the deep-V notch down its center
+        // returns the tee — the two-tone read survives every scale the feed gate
+        // tests. The prof keeps his ink torso (a different PERSON, not the brand).
+        // FP0 (Verdict P0 — CAST BY VALUE): the worker stops sharing the host's
+        // bronze tee — his torso mass drops to a lighter WARM GRAY-INK so the
+        // ownerWorker pair differentiates by VALUE, not just by cap shape.
+        const torsoMass = prof ? ink : worker ? '#5E7B9E' : OUTFIT.tee;
+        // VAULT NOIR v3 — TAILORED MATERIAL: the suit body fills with a
+        // vertical gradient (lit chest → shadowed hem) so the torso reads as
+        // cloth under the key light, not as a flat capsule.
+        {
+            const suitGrad = ctx.createLinearGradient(0, ty0, 0, ty1);
+            suitGrad.addColorStop(0, (0, theme_1.hexLerp)(torsoMass, '#9FC0E8', 0.22));
+            suitGrad.addColorStop(0.55, torsoMass);
+            suitGrad.addColorStop(1, (0, theme_1.hexLerp)(torsoMass, '#050912', 0.38));
+            ctx.fillStyle = suitGrad;
+        }
+        ctx.beginPath();
+        ctx.moveTo(rX(0, wH), rY(0, wH));
+        ctx.quadraticCurveTo(rX(0.25, wH * 0.7), rY(0.25, wH * 0.7), rX(0.45, wW), rY(0.45, wW));
+        ctx.quadraticCurveTo(rX(0.6, wW * 1.1), rY(0.6, wW * 1.1), rX(0.75, wC), rY(0.75, wC));
+        ctx.quadraticCurveTo(rX(0.9, wC * 0.95), rY(0.9, wC * 0.95), rX(1.0, wS), rY(1.0, wS));
+        ctx.lineTo(lX(1.0, wS), lY(1.0, wS));
+        ctx.quadraticCurveTo(lX(0.9, wC * 0.95), lY(0.9, wC * 0.95), lX(0.75, wC), lY(0.75, wC));
+        ctx.quadraticCurveTo(lX(0.6, wW * 1.1), lY(0.6, wW * 1.1), lX(0.45, wW), lY(0.45, wW));
+        ctx.quadraticCurveTo(lX(0.25, wH * 0.7), lY(0.25, wH * 0.7), lX(0, wH), lY(0, wH));
+        ctx.closePath();
+        ctx.fill();
+        // PLAYBOOK P2 — THE DRAWN OUTLINE: the same path stroked in ink at
+        // 3.5px, with the neck→shoulder junctions pinched concave (the
+        // trapezius read). A filled capsule reads as clip-art; a stroked
+        // contour reads as drawn. Stroke runs INSIDE the fill edge so the
+        // silhouette width is unchanged for the collision guard.
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+        // P1 — THE GOLD VEST PANEL: same torso rail, FP0 two-tone split at the
+        // 50% torso line (vest owns the chest band 0.50..0.98, the tee owns the
+        // belly), inset ~12% so the tee's ink outline still frames it. Filled +
+        // 2px ink outline; the deep-V tee notch below returns the tee at the
+        // center chest. FP0 CAST: the worker does NOT wear the brand vest — the
+        // gray-ink torso is his silhouette (the gold vest is the host's alone).
+        if (!prof && !worker) {
+            // VAULT NOIR v3 — the suit front carries its own gradient + a brass
+            // lapel line instead of the old flat gold vest.
+            const vestGrad = ctx.createLinearGradient(0, ty0, 0, ty1);
+            vestGrad.addColorStop(0, (0, theme_1.hexLerp)(OUTFIT.vest, '#9FC0E8', 0.30));
+            vestGrad.addColorStop(1, (0, theme_1.hexLerp)(OUTFIT.vest, '#050912', 0.30));
+            ctx.fillStyle = vestGrad;
+            ctx.beginPath();
+            ctx.moveTo(rX(0.50, wW * 0.88), rY(0.50, wW * 0.88));
+            ctx.quadraticCurveTo(rX(0.62, wW * 0.96), rY(0.62, wW * 0.96), rX(0.75, wC * 0.82), rY(0.75, wC * 0.82));
+            ctx.quadraticCurveTo(rX(0.90, wC * 0.80), rY(0.90, wC * 0.80), rX(0.98, wS * 0.78), rY(0.98, wS * 0.78));
+            ctx.lineTo(lX(0.98, wS * 0.78), lY(0.98, wS * 0.78));
+            ctx.quadraticCurveTo(lX(0.90, wC * 0.80), lY(0.90, wC * 0.80), lX(0.75, wC * 0.82), lY(0.75, wC * 0.82));
+            ctx.quadraticCurveTo(lX(0.62, wW * 0.96), lY(0.62, wW * 0.96), lX(0.50, wW * 0.88), lY(0.50, wW * 0.88));
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = (0, theme_1.rgba)('#9FC0E8', 0.75);
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // the brass LAPEL — one hairline down the vest's near edge: the
+            // tailored signature (replaces the old gold-vest read)
+            ctx.strokeStyle = (0, theme_1.rgba)(theme_1.PALETTE.goldDisplay, 0.85);
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.moveTo(rX(0.56, wW * 0.92), rY(0.56, wW * 0.92));
+            ctx.quadraticCurveTo(rX(0.74, wC * 0.84), rY(0.74, wC * 0.84), rX(0.97, wS * 0.80), rY(0.97, wS * 0.80));
+            ctx.stroke();
+            // the deep-V notch — the shirt shows through the vest's opening
+            ctx.fillStyle = (0, theme_1.hexLerp)(OUTFIT.tee, '#9FC0E8', 0.45);
+            ctx.beginPath();
+            ctx.moveTo(rX(0.97, wS * 0.34), rY(0.97, wS * 0.34));
+            ctx.lineTo(rX(0.62, 0), rY(0.62, 0));
+            ctx.lineTo(lX(0.97, wS * 0.34), lY(0.97, wS * 0.34));
+            ctx.closePath();
+            ctx.fill();
+        }
+        // shoulder caps — small rounded delts at the shoulder line (vest gold:
+        // the deltoid sits on the vest's shoulder strap; the worker's stay on
+        // his gray-ink torso — FP0 cast-by-value)
+        ctx.fillStyle = prof || worker ? torsoMass : OUTFIT.vest;
+        ctx.beginPath();
+        ctx.arc(rX(0.92, wS * 0.6), rY(0.92, wS * 0.6), wS * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(lX(0.92, wS * 0.6), lY(0.92, wS * 0.6), wS * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        // hip block — a short horizontal bar at the pelvis for grounding
+        // (tee tone: the vest ends above the waist; the pelvis is trouser/tee)
+        ctx.fillStyle = torsoMass;
+        ctx.beginPath();
+        ctx.ellipse(tx0 + tdx * 0.08, ty0 + tdy * 0.08, wH * 1.1, wH * 0.45, Math.atan2(tdx, -tdy), 0, Math.PI * 2);
+        ctx.fill();
+        // 100-JUDGE PANEL REPORT (fix A3 — THE HEM): a 3px ink line across the
+        // capsule's bottom edge — the gold mass becomes a hemmed garment
+        // instead of a leotard. Skips the prof (ink torso: ink on ink).
+        if (!prof) {
+            ctx.strokeStyle = ink;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(lX(0.045, wH * 0.86), lY(0.045, wH * 0.86));
+            ctx.lineTo(rX(0.045, wH * 0.86), rY(0.045, wH * 0.86));
+            ctx.stroke();
+        }
+    }
+    // (AUDIT-ROUND-3, Fix 1: the torso rim light is RETIRED — the close-up
+    // panel read it as "the white neck/chest stripe is unexplained - the
+    // brightest value on the body and it's arbitrary". The body's light
+    // logic now lives in the torso's own two-tone fill and the head's rim
+    // edge only; no free-floating stripes.)
+    // AUDIT-PHASE-2: SIGNATURE TORSO BAND — a gold band across the chest.
+    // The host becomes identifiable by silhouette color in any thumbnail
+    // or feed scroll (the Alan-Becker chosen-one-color rule). Brand-
+    // reinforcing; rides the lean angle so it stays anatomically on the
+    // chest through poses. Draws at 75% alpha so it never fights the
+    // scarf's brand primacy.
+    // Phase 1 item 1: the band RETIRES on the host — the torso mass now
+    // IS the gold signature (BODY_MASS); a gold band on a gold body reads
+    // as decoration. The scarf + knot remain the collar brand.
+    if (r.scarf !== false && prof) {
+        const bandY = pelvisY - TORSO * 0.55;
+        const bandW = (perception_1.INK.torso[0]) * 0.9 + 8;
+        ctx.save();
+        ctx.translate(neckX * 0.5, bandY);
+        ctx.rotate(leanR2);
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.gold, 0.75);
+        ctx.beginPath();
+        ctx.moveTo(-bandW, -6);
+        ctx.lineTo(bandW, -6);
+        ctx.lineTo(bandW * 0.85, 6);
+        ctx.lineTo(-bandW * 0.85, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.goldDeep, 0.5);
+        ctx.fillRect(-bandW * 0.85, 4, bandW * 1.7, 2);
+        ctx.restore();
+    }
+    // AUDIT-2 / 1.4 (report §10.2, C6) — THE COLLAR BREAK. The gold knot
+    // flowed into the head circle with no separation ("the head looks
+    // welded to clothing"). Two short tapered ink strokes flare from the
+    // neck, and the knot drops 3px so background shows between chin,
+    // collar and scarf: three tailored layers instead of one stack.
+    if (r.scarf !== false) {
+        taper(ctx, neckX - 4, neckY + 1, neckX - 13, neckY + 13, 7, 3.5, ink);
+        taper(ctx, neckX + 4, neckY + 1, neckX + 13, neckY + 13, 7, 3.5, ink);
+    }
+    // gold scarf (brand) — P0-4: knot + the filled two-tone ribbon tail.
+    // P1-4/P1-5 (report §12.5): wave amplitude couples to body motion — and
+    // the walk coupling rises 1.8 → 3.2: at 1.8 the scarf only kept pace with
+    // the stride; at 3.2 it ANSWERS it (the fabric trails each plant and
+    // whips on the push-off — a secondary action that says "there is mass
+    // and air here", the classic follow-through tell).
+    if (r.scarf !== false) {
+        // B3 RE-SPEC (Visual Quality Audit §3.1): the knot compacts — the old
+        // 13×8 ellipse + 26×11 collar band read as a chest plate at hero rigs.
+        // A knot is a knot: 10×6.5 with a 20×9 collar wrap keeps the tied-scarf
+        // read and lets the head/neck anatomy show.
+        ctx.fillStyle = '#31436B';
+        ctx.beginPath();
+        ctx.ellipse(neckX, neckY + 10, 10, 6.5, leanR * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        // VAULT NOIR v3: a brass outline on the silk knot — the two-tone knot
+        // reads as a tied scarf at any size.
+        ctx.strokeStyle = theme_1.PALETTE.gold;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.ellipse(neckX, neckY + 10, 10, 6.5, leanR * 0.6, 0, Math.PI * 2);
+        ctx.stroke();
+        // P1 scarf v3 (100-judge dossier): the neck-wrap collar — a gold band
+        // around the neck base, drawn after the torso so it sits ON the body.
+        // This is what makes the scarf read as WORN (the tail lives behind the
+        // shoulder, drawn pre-torso); the knot becomes the band's tie knot.
+        ctx.fillStyle = '#31436B';
+        (0, theme_1.roundRect)(ctx, neckX - 10, neckY + 1, 20, 9, 4.5);
+        ctx.fill();
+        ctx.strokeStyle = theme_1.PALETTE.gold;
+        ctx.lineWidth = 2;
+        (0, theme_1.roundRect)(ctx, neckX - 10, neckY + 1, 20, 9, 4.5);
+        ctx.stroke();
+    }
+    // NEAR arm — capture the hand so props ride it (v5, audit P1-3)
+    // P1-4 (audit Table 3): the SHOULDER DROP — the near shoulder sinks by
+    // pose.shoulderDrop (the wry slouch +4.5px, the warm chest-open lift
+    // −3px). A silhouette-level emotion term: the shoulder LINE tilts, the
+    // whole read changes shape, not just a brow angle.
+    // 100-JUDGE VISUAL AUDIT (Phase 1 — FACE CRAFT AT SILHOUETTE SCALE): the
+    // expression rig now drives the SHOULDERS too — skepticism sloughs the
+    // shoulder line (+6 units, the "unimpressed" read), surprise hunches it
+    // (−5, the flinch). The face's own channels (browRaise / browAngle) are
+    // the single source, so face and silhouette can never disagree.
+    const surpriseT = (0, easing_1.clamp01)(((pose.browRaise ?? 0) - 0.55) / 0.45);
+    const concernedT = (0, easing_1.clamp01)(((pose.browAngle ?? 0) - 8) / 12);
+    const exprDrop = concernedT * 6 - surpriseT * 5;
+    const shDrop = (pose.shoulderDrop ?? 0) + exprDrop;
+    // ── CONTACT VERBS: solve the near arm onto the scene's touch point ──
+    // The shoulder anchor here replicates limb2's own start point 1:1 (the
+    // same neck + shoulder-tilt + drop terms), so the SOLVED angles land the
+    // rendered hand on the target. Everything the pose still owns (body,
+    // legs, head, far arm, mouth) keeps animating — the hand stays planted
+    // while the figure talks, which is the whole grammar.
+    // P2 U7 (ARMS ANSWER THE STRIDE): the near-arm IK override is a PLANTED
+    // grammar — it pins the swing arm to a contact point. While the figure
+    // WALKS (walkPhase defined), the keyed stride owns the near arm: the
+    // pose's contralateral swing (±33..-53°, the elbow folding with the
+    // swing) renders instead of a static IK grip, so the strip test shows
+    // alternating arm leads. Planted poses (no walkPhase) keep the IK.
+    if (r.contact && r.walkPhase === undefined) {
+        const shX2 = neckX + 4 + Math.sin(shT) * 4;
+        const shY2 = neckY + 3 - Math.sin(shT) * 9 + shDrop;
+        const flipS = r.flip ? -1 : 1;
+        const tLx = ((r.contact.x - cx) / scale) * flipS;
+        const tLy = (r.contact.y - groundY) / scale;
+        // P2 (KILL THE RUBBER ARM): clamp the target to 94% of skeletal reach —
+        // the elbow keeps a visible bend at every distance; full extension read
+        // as rubber on the chartTwin reach. (Root shift above already closed the
+        // long-distance gap; this clamp is the local guarantee.)
+        const NATURAL = (U_ARM + L_ARM) * 0.94;
+        const rigDist = Math.hypot(tLx - shX2, tLy - shY2) || 1;
+        const tLx2 = rigDist > NATURAL ? shX2 + ((tLx - shX2) / rigDist) * NATURAL : tLx;
+        const tLy2 = rigDist > NATURAL ? shY2 + ((tLy - shY2) / rigDist) * NATURAL : tLy;
+        const ik = armIk(shX2, shY2, tLx2, tLy2, U_ARM, L_ARM, r.contact.bend ?? 1);
+        // Fix 5.7 (chartTwin — THE HAND ARRIVES WITH THE PEN): a contact that
+        // switches on mid-scene must not teleport the arm — the hard-swap read
+        // as a glitch is the exact defect the reaction-envelope round retired.
+        // `easeAt` = the scene-ms the touch begins; the solved angles blend in
+        // over the house 480ms easeOutCubic (the pose's own angles own the arm
+        // until then). Before easeAt the contact rect still registers (the hand
+        // is approaching its own target, not plating foreign content).
+        if (r.contact.easeAt !== undefined) {
+            const ep = (0, easing_1.clamp01)((t - r.contact.easeAt) / 480);
+            if (ep < 1) {
+                const eb = (0, easing_1.easeOutCubic)(ep);
+                pose.rAU = lerp2(pose.rAU, ik.aU, eb);
+                pose.rAL = lerp2(pose.rAL, ik.aL, eb);
+                if (r.contact.hand)
+                    pose.rHand = r.contact.hand;
+            }
+            else {
+                pose.rAU = ik.aU;
+                pose.rAL = ik.aL;
+                if (r.contact.hand)
+                    pose.rHand = r.contact.hand;
+            }
+        }
+        else {
+            pose.rAU = ik.aU;
+            pose.rAL = ik.aL;
+            if (r.contact.hand)
+                pose.rHand = r.contact.hand;
+        }
+        // the hand's scene-space rect — guard-visible ('contact'), so it can
+        // never plate the caption pill or the watermark even mid-gesture
+        const hLx = shX2 + Math.sin(pose.rAU * D2R) * U_ARM + Math.sin(pose.rAL * D2R) * L_ARM;
+        const hLy = shY2 + Math.cos(pose.rAU * D2R) * U_ARM + Math.cos(pose.rAL * D2R) * L_ARM;
+        const hsx = cx + flipS * hLx * scale;
+        const hsy = groundY + hLy * scale;
+        (0, collision_1.registerRect)(`contact@${Math.round(hsx)},${Math.round(hsy)}`, hsx - 30 * scale, hsy - 30 * scale, 60 * scale, 60 * scale, 'contact');
+    }
+    // ── 100-JUDGE PANEL / PHASE 2 item 2 — POINTAT, the clearance solve ──
+    // The near arm is solved so the fingertip TERMINATES on the target rect's
+    // boundary expanded by a 40-60px band (hash-picked per seed — one figure
+    // holds one distance, scrub-stable), never inside it. strength mode parks
+    // the arm on the boundary every frame; enforce mode only corrects the
+    // pose when its own hand enters the zone. Out-of-reach: armIk's clamp
+    // straightens the arm toward the point — the hand falls SHORT of the
+    // boundary, which still respects "never inside".
+    if (r.pointAt && !r.contact) {
+        const shXp = neckX + 4 + Math.sin(shT) * 4;
+        const shYp = neckY + 3 - Math.sin(shT) * 9 + shDrop;
+        const flipP = r.flip ? -1 : 1;
+        const pt = r.pointAt;
+        // P2 (Verdict report — TOUCH MUST BE LEGIBLE): the verb decides the
+        // band. point-at-TEXT keeps the 40-60px clearance (the pad never crowds
+        // the letters); a TOUCH/BRACKET verb flips the sign — the fingertip
+        // lands 4-8px INSIDE the target rect's edge (hash-picked, one figure
+        // holds one overlap, scrub-stable), so the contact is physically ON the
+        // data with the FP0 fingertip and the 0.42 press shadow sealing it.
+        const cl = pt.touch
+            ? -(4 + (0, easing_1.hash01)(seed * 3.7 + 2.1) * 4)
+            : 40 + (0, easing_1.hash01)(seed * 7.31 + 1.7) * 20;
+        // the figure's shoulder in SCENE space (the same mapping the contact
+        // block inverts — rig → scene with flip)
+        const shSceneX = cx + flipP * shXp * scale;
+        const shSceneY = groundY + shYp * scale;
+        // the pose's OWN hand in scene space (enforce mode's trigger test)
+        const ownAL = pose.rAL * D2R;
+        const ownAU = pose.rAU * D2R;
+        const ownRx = shXp + Math.sin(ownAU) * U_ARM + Math.sin(ownAL) * L_ARM;
+        const ownRy = shYp + Math.cos(ownAU) * U_ARM + Math.cos(ownAL) * L_ARM;
+        const ownSceneX = cx + flipP * ownRx * scale;
+        const ownSceneY = groundY + ownRy * scale;
+        // nearest point on the EXPANDED rect to a scene point
+        const exp = { x: pt.x - cl, y: pt.y - cl, w: pt.w + cl * 2, h: pt.h + cl * 2 };
+        const nearOn = (sx2, sy2) => {
+            const qx = Math.max(exp.x, Math.min(sx2, exp.x + exp.w));
+            const qy = Math.max(exp.y, Math.min(sy2, exp.y + exp.h));
+            const insideExp = qx === sx2 && qy === sy2;
+            if (!insideExp)
+                return { x: qx, y: qy, inside: false };
+            // the point sits inside the expanded rect — push it out along the
+            // point → rect-center axis to the expanded boundary
+            const cxr = pt.x + pt.w / 2;
+            const cyr = pt.y + pt.h / 2;
+            const dx2 = sx2 - cxr;
+            const dy2 = sy2 - cyr;
+            const l2 = Math.hypot(dx2, dy2) || 1;
+            // distance from the center to the expanded rect's edge along the axis
+            const exX = Math.abs(dx2 / l2) > 1e-6 ? (exp.w / 2) / Math.abs(dx2 / l2) : Infinity;
+            const exY = Math.abs(dy2 / l2) > 1e-6 ? (exp.h / 2) / Math.abs(dy2 / l2) : Infinity;
+            const t2 = Math.min(exX, exY);
+            return { x: cxr + (dx2 / l2) * t2, y: cyr + (dy2 / l2) * t2, inside: true };
+        };
+        let fire = false;
+        if (pt.enforce) {
+            // fire only when the pose's own hand enters the clearance zone of the
+            // TRUE rect (distance < cl) or the rect itself
+            const dRect = Math.hypot(Math.max(pt.x - ownSceneX, 0, ownSceneX - (pt.x + pt.w)), Math.max(pt.y - ownSceneY, 0, ownSceneY - (pt.y + pt.h)));
+            fire = dRect < cl;
+        }
+        else {
+            fire = (pt.strength ?? 1) > 0.02;
+        }
+        if (fire) {
+            const target = nearOn(pt.enforce ? ownSceneX : shSceneX, pt.enforce ? ownSceneY : shSceneY);
+            const tLxp = ((target.x - cx) / scale) * flipP;
+            const tLyp = (target.y - groundY) / scale;
+            const ikP = armIk(shXp, shYp, tLxp, tLyp, U_ARM, L_ARM, pt.bend ?? 1);
+            const st = pt.enforce ? 1 : (pt.strength ?? 1);
+            pose.rAU = pose.rAU + (ikP.aU - pose.rAU) * st;
+            pose.rAL = pose.rAL + (ikP.aL - pose.rAL) * st;
+            if (pt.hand)
+                pose.rHand = pt.hand;
+        }
+        // the fingertip's scene-space rect — TIGHT pad (±13·scale: the drawn
+        // glyph + tip) — the guard's hand-vs-text pass reads it. At the 40-60px
+        // clearance band the pad's edge keeps ≥ ~2px from the target bbox at
+        // any rig scale in the film (max 2.65).
+        {
+            const aUf = pose.rAU * D2R;
+            const aLf = pose.rAL * D2R;
+            const hfx = shXp + Math.sin(aUf) * U_ARM + Math.sin(aLf) * L_ARM;
+            const hfy = shYp + Math.cos(aUf) * U_ARM + Math.cos(aLf) * L_ARM;
+            const hsxP = cx + flipP * hfx * scale;
+            const hsyP = groundY + hfy * scale;
+            (0, collision_1.registerRect)(`point@${Math.round(hsxP)},${Math.round(hsyP)}`, hsxP - 13 * scale, hsyP - 13 * scale, 26 * scale, 26 * scale, 'contact');
+        }
+    }
+    // 100-JUDGE AUDIT (Part 9.1 — REAL SMEAR FRAMES). The old 2-ghost trail
+    // read as "three arms" / "rubbery" on stills and vanished at the phone
+    // gate. A real smear frame is ONE elongated drawing spanning the arc the
+    // hand just swept, existing 1-2 frames at peak velocity, invisible at
+    // rest. Stateless geometry: the sweep is reconstructed from the CURRENT
+    // pose minus the accent swing (stickman.ts drives rAL by accent*26°, so
+    // the hand one accent ago sits at rAL - sm*26°) — pure function of the
+    // pose, scrub-determinism preserved. The smear's leading edge extends
+    // 18% PAST the hand (the classic smear overshoot), the taper narrows
+    // toward the trail, and 3 finger-stubs dot the swept arc behind the hand.
+    // D-7 (100-judge dossier — SMEAR RETIRED): the 3-pass accent ghost drew
+    // three ink arm drawings at stepped alphas after ~1 word in 4. On stills
+    // — paused frames, thumbnails, every audit evidence dump — it read as a
+    // gray cloud at the hand (verified on frame 04-divergeK-named). The
+    // accent smear is deleted; the stride-keyed leg smear (legSmear, below)
+    // stays — it fires only mid-stride at real velocity, the report's "keep
+    // a velocity streak for the run". Velocity now reads through the keyed
+    // poses and the walk strike, never through ghost ink.
+    // PHASE-5 (report §11 Phase 5 — LET THE BODY ACT): the CHART-SATCHEL —
+    // one signature silhouette change per act: in the data chapters the
+    // presenter CARRIES his material. Strap from the far shoulder to the
+    // near hip, bag on the hip line, the K chart on the flap — a silhouette
+    // read (bag + strap change the torso's outline) that survives the 320px
+    // gate. Drawn before the near arm so the arm drapes over the strap, the
+    // way a worn bag hangs. Rig-space, scrub-safe: a pure function of the
+    // pose's own anchors (hip, neck) and the breathing cycle.
+    if (r.satchel) {
+        (0, scene_props_1.notePropDraw)('satchel');
+        const bagW = 46, bagH = 36;
+        const bagX = hipRX + 22, bagY = pelvisY + 30 + Math.sin(t / 2400 + seed * 3.1) * 1.2;
+        // the strap: far shoulder to the bag's top edge — ink over the vest,
+        // thick enough to read at the 320px gate
+        taper(ctx, neckX - 5, neckY + 8, bagX - bagW * 0.3, bagY - bagH * 0.42, 8, 4.5, theme_1.PALETTE.ink);
+        // the bag body — rounded, slightly swung by the walk phase
+        ctx.save();
+        ctx.translate(bagX, bagY);
+        ctx.rotate(((r.walkPhase !== undefined ? Math.sin(t / 260 + seed) * 0.06 : 0)) + (pose.pelvisTilt ?? 0) * 0.004);
+        ctx.fillStyle = '#F6F1E3';
+        ctx.strokeStyle = theme_1.PALETTE.ink;
+        ctx.lineWidth = 3;
+        (0, theme_1.roundRect)(ctx, -bagW / 2, -bagH / 2, bagW, bagH, 7);
+        ctx.fill();
+        ctx.stroke();
+        // the flap seam + the gold clip
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(-bagW / 2 + 3, -bagH / 2 + 11);
+        ctx.lineTo(bagW / 2 - 3, -bagH / 2 + 11);
+        ctx.stroke();
+        ctx.fillStyle = theme_1.PALETTE.gold;
+        ctx.beginPath();
+        ctx.arc(0, -bagH / 2 + 11, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        // the K chart on the flap — the brand's own motif, teal, rising
+        ctx.strokeStyle = theme_1.PALETTE.up;
+        ctx.lineWidth = 3.4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-bagW / 2 + 8, bagH / 2 - 9);
+        ctx.lineTo(-bagW / 2 + 16, bagH / 2 - 18);
+        ctx.lineTo(-bagW / 2 + 23, bagH / 2 - 13);
+        ctx.lineTo(-bagW / 2 + 34, bagH / 2 - 22);
+        ctx.stroke();
+        ctx.restore();
+    }
+    // BLUEPRINT Phase 2: near arm 13/11/9 -> 17/13/10 (INK.armNear); the
+    // shoulder anchor rides the shoulder-line counter-tilt (Phase 2's
+    // second rotation term — the near shoulder rises when shT is positive)
+    // and the P1-4 shoulder drop.
+    // Phase 1 item 1: the host's near arm rides the ARM_MASS sleeve color
+    // (the same suit as the torso); the hand glyph stays ink. Below rig
+    // scale 1.2 the arm stays ink — the far-limb atmospheric register.
+    // AUDIT-ROUND-3 iter-2: ONE INK on every limb — the gold sleeve routing
+    // is retired (see the note at ARM_MASS's grave above).
+    const nearArmCol = ink;
+    // PHASE 3 (audit §8 — RESTORED ARM SMEAR): the three-speedline trail on
+    // the strike arc, drawn BEFORE the arm so the ink limb stays on top.
+    // The hand's position one strike-phase ago is reconstructed from the
+    // same angles (rAU/rAL minus the swept arc), three thin tapers ride the
+    // arc's normal offsets with gaps — the leg smear's grammar (PHASE-5
+    // D-09 fix) applied to the accent strike. Fires ONLY when the caller
+    // passes armSmear from the two-tier accent envelope (accentPulse —
+    // content-word strikes only). Total ink is a fraction of the retired
+    // ghost mass; the velocity read is stronger.
+    if ((r.armSmear ?? 0) > 0.12) {
+        const asm = (0, easing_1.clamp01)(r.armSmear ?? 0);
+        const aU5 = (pose.rAU - 24 * asm) * D2R;
+        const aL5 = (pose.rAL - 26 * asm) * D2R;
+        const shX3 = neckX + 4 + Math.sin(shT) * 4;
+        const shY3 = neckY + 3 - Math.sin(shT) * 9 + shDrop;
+        // the hand NOW
+        const hex = shX3 + Math.sin(pose.rAU * D2R) * U_ARM + Math.sin((pose.rAU + pose.rAL) * D2R) * L_ARM;
+        const hey = shY3 + Math.cos(pose.rAU * D2R) * U_ARM + Math.cos((pose.rAU + pose.rAL) * D2R) * L_ARM;
+        // the hand one strike-phase ago
+        const hpX = shX3 + Math.sin(aU5) * U_ARM + Math.sin(aU5 + aL5) * L_ARM;
+        const hpY = shY3 + Math.cos(aU5) * U_ARM + Math.cos(aU5 + aL5) * L_ARM;
+        ctx.save();
+        const nx2 = -(hey - hpY), ny2 = (hex - hpX);
+        const nl2 = Math.hypot(nx2, ny2) || 1;
+        for (const k of [-1, 0, 1]) {
+            const off = k * 10;
+            ctx.globalAlpha = alpha * (k === 0 ? 0.30 : 0.18) * asm;
+            taper(ctx, hpX + nx2 / nl2 * off, hpY + ny2 / nl2 * off, hex + (hex - hpX) * 0.12 + nx2 / nl2 * off, hey + (hey - hpY) * 0.12 + ny2 / nl2 * off, perception_1.INK.armNear[1] * 0.5, perception_1.INK.armNear[2] * 0.25, nearArmCol);
+        }
+        ctx.restore();
+    }
+    const hand = limb2(ctx, neckX + 4 + Math.sin(shT) * 4, neckY + 3 - Math.sin(shT) * 9 + shDrop, pose.rAU, pose.rAL, U_ARM, L_ARM, perception_1.INK.armNear[0], perception_1.INK.armNear[1], perception_1.INK.armNear[2], nearArmCol, 0, 0.92); // iter-3: elbow mass
+    bbTouch(hand.ex, hand.ey, 18); // PHASE 3 bbox: near hand glyph
+    // 100-JUDGE PANEL REPORT (fix A3 — THE ROLLED SLEEVE, near arm): same
+    // band as the far arm — the near limb is the one the camera reads.
+    if (!prof) {
+        taper(ctx, neckX + 4 + Math.sin(shT) * 4, neckY + 3 - Math.sin(shT) * 9 + shDrop, neckX + 4 + Math.sin(shT) * 4 + Math.sin(pose.rAU * D2R) * U_ARM * 0.58, neckY + 3 - Math.sin(shT) * 9 + shDrop + Math.cos(pose.rAU * D2R) * U_ARM * 0.58, perception_1.INK.armNear[0] + 5, perception_1.INK.armNear[0] - 1, '#6E5210');
+    }
+    // AUDIT-ROUND-3 (Fix 1): the torso rim light block that drew here is
+    // RETIRED — see the note above the near arm. One light edge (the
+    // head's rim) per figure; the torso is mass, not chrome.
+    // AUDIT-ROUND-2 (fix 19 — CONTACT): the small soft shadow where the near
+    // hand meets the presented object — the K's stem (leanOnK / kContact) and
+    // every CONTACT-VERB staging (pie rim, rack face, 493 wall). Drawn just
+    // UNDER the hand glyph so the hand lands ON the object.
+    if (r.kContact || r.contact) {
+        // 100-JUDGE PANEL REPORT (defect D6 — THE SHADOW IN THE AIR): the
+        // contact ellipse drew at hand + (+2, +7) — BELOW the hand — so on
+        // vertical surfaces (the K stem) it floated in the air BESIDE the
+        // object, a grey oval attached to nothing (the naming-beat frames).
+        // The press-point shadow now sits centered ON the hand and rotates to
+        // the FOREARM direction (canvas rotation pi/2 - a aligns the major
+        // axis with the (sin a, cos a) limb convention): wherever the hand
+        // presses — stem, wall, pie rim — the shadow reads as pressure AT the
+        // contact, never as a floating smudge.
+        // PHASE 1 round 3 (panel: "contact shadows soft — verify at 1x"): the
+        // press-point shadow deepens one register (0.30 → 0.42) and widens
+        // (24x10 → 30x12) so the junction reads at feed scale on both cream
+        // and white surfaces.
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.42);
+        ctx.beginPath();
+        ctx.ellipse(hand.ex, hand.ey, 30, 12, Math.PI / 2 - pose.rAL * D2R, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // P0-2 + AUDIT-2 / 1.3 (report §10.2, C5): TWO GLYPHS — the fan at hero
+    // scale, the mitten below rig scale 0.85 (BLUEPRINT: threshold 1.0 ->
+    // 0.85 so the glyph never switches mid-scene on a scaled host),
+    // selected right here.
+    // PHASE 1 round 5 (the panel's "no palm pad" note): a hand mid-contact
+    // draws one size step up so the pad reads at feed scale — a pressing palm,
+    // not a tapered limb tip.
+    handGlyph(ctx, hand.ex, hand.ey, pose.rAL, r.contact ? 19 : 16, ink, scale, pose.rHand, grip); // P1-2 r3: rig scale picks the glyph tier; Phase 1: hands stay ink
+    // 100-JUDGE PANEL / Phase 1 item 4 — CAST BY SILHOUETTE (report §6
+    // Phase 1): "the count host gets rolled sleeves." When the near hand
+    // runs a count glyph, the sleeve's cuff ROLLS — a bright ivory band at
+    // the forearm's 30% point (just above where the count fingers root),
+    // on the goldDeep sleeve so it reads as folded cloth at 320px. The
+    // counting gesture becomes WORK: a body preparing to count, not a
+    // mannequin that always had bare arms.
+    // AUDIT-ROUND-3 iter-2: the cuff keeps drawing on the ink arm (an ivory
+    // band reads as a rolled sleeve on ink exactly as it did on gold) —
+    // the counting gesture keeps its work cue.
+    if (pose.rHand && pose.rHand.startsWith('count') && !prof) {
+        const aL = pose.rAL * D2R;
+        const sx3 = neckX + 4 + Math.sin(shT) * 4;
+        const sy3 = neckY + 3 - Math.sin(shT) * 9 + shDrop;
+        const aU3 = pose.rAU * Math.PI / 180;
+        // the cuff sits at 30% along the FOREARM (upper-arm end → hand)
+        const exU = sx3 + Math.sin(aU3) * U_ARM;
+        const eyU = sy3 + Math.cos(aU3) * U_ARM;
+        const cfx = exU + Math.sin(aL) * L_ARM * 0.3;
+        const cfy = eyU + Math.cos(aL) * L_ARM * 0.3;
+        ctx.save();
+        ctx.translate(cfx, cfy);
+        ctx.rotate(aL);
+        ctx.fillStyle = '#F7EFD8';
+        (0, theme_1.roundRect)(ctx, -6.5, -9, 13, 18, 4);
+        ctx.fill();
+        ctx.restore();
+    }
+    if (r.prop === 'holdCard') {
+        // P2 (Verdict report — HOLD AND BALANCE THE NUMBERS): the host HOLDS a
+        // stat card's edge — the grip hand clamps the card's short side, the
+        // card leans off the forearm (a held object, never a floating decal).
+        // White card, gold number band, ink outline: a miniature of the film's
+        // stat-card language, drawn at the near hand so the hold is exact.
+        (0, scene_props_1.notePropDraw)('holdCard');
+        ctx.save();
+        ctx.translate(hand.ex + 10, hand.ey - 26);
+        ctx.rotate(-0.12 + Math.sin(t / 900 + seed) * 0.02);
+        ctx.fillStyle = theme_1.PALETTE.card;
+        (0, theme_1.roundRect)(ctx, -4, -30, 52, 64, 7);
+        ctx.fill();
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 3;
+        (0, theme_1.roundRect)(ctx, -4, -30, 52, 64, 7);
+        ctx.stroke();
+        ctx.fillStyle = theme_1.PALETTE.gold;
+        (0, theme_1.roundRect)(ctx, 4, -20, 36, 14, 4);
+        ctx.fill();
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.inkSoft, 0.75);
+        (0, theme_1.roundRect)(ctx, 4, 2, 30, 5, 2.5);
+        ctx.fill();
+        (0, theme_1.roundRect)(ctx, 4, 12, 24, 5, 2.5);
+        ctx.fill();
+        ctx.restore();
+        // the grip bar across the card edge — the fingers wrap the short side
+        ctx.fillStyle = ink;
+        (0, theme_1.roundRect)(ctx, hand.ex + 2, hand.ey - 34, 12, 30, 5);
+        ctx.fill();
+    }
+    if (r.prop === 'coinStack') {
+        // P2 (Verdict report — BALANCE A COIN STACK ON A PALM): five coins on
+        // the upturned near palm, the stack swaying a hair with the weight-shift
+        // clock (balance is a live act, not a decal). Gold rims + ink edges so
+        // the stack reads at feed scale; the palm rides the 'open' glyph when
+        // the scene does not override it.
+        (0, scene_props_1.notePropDraw)('coinStack');
+        const sway = Math.sin(t / 2400 + seed * 3.1) * 1.6;
+        for (let c = 0; c < 5; c++) {
+            const cy2 = hand.ey - 8 - c * 7.5;
+            const cxo = hand.ex + 14 + sway * (c / 4);
+            ctx.fillStyle = theme_1.PALETTE.goldDisplay;
+            ctx.beginPath();
+            ctx.ellipse(cxo, cy2, 13, 5.2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = ink;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+    }
+    if (r.prop === 'thumb') {
+        // a short stub above the fist — reads as a raised thumb at any scale
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 9;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(hand.ex, hand.ey - 4);
+        ctx.lineTo(hand.ex + 3, hand.ey - 24);
+        ctx.stroke();
+    }
+    if (r.prop === 'coffee') {
+        (0, scene_props_1.notePropDraw)('coffee');
+        // the second character's mug — upright regardless of arm angle
+        ctx.save();
+        ctx.translate(hand.ex, hand.ey + 6);
+        // cup body
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 5;
+        (0, theme_1.roundRect)(ctx, -14, -12, 28, 32, 6);
+        ctx.fill();
+        ctx.stroke();
+        // handle on the outer (screen-right) side
+        ctx.beginPath();
+        ctx.arc(17, 4, 9, -Math.PI / 2.2, Math.PI / 2.2);
+        ctx.stroke();
+        // coffee surface
+        ctx.fillStyle = (0, theme_1.rgba)('#8F6E12', 0.9);
+        (0, theme_1.roundRect)(ctx, -10, -9, 20, 6, 3);
+        ctx.fill();
+        // steam — two deterministic wisps
+        ctx.strokeStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.55);
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        for (let s = 0; s < 2; s++) {
+            const ph = t / 640 + s * 2.4;
+            ctx.beginPath();
+            ctx.moveTo(-4 + s * 9, -14);
+            ctx.quadraticCurveTo(-4 + s * 9 + Math.sin(ph) * 7, -26, -4 + s * 9 + Math.sin(ph + 1.2) * 9, -38);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+    // ── 100-JUDGE PANEL / PHASE 2 item 5 — CAST PROPS: briefcase / lunchbox ──
+    // One-beat silhouette reads on the ownerWorker pair: the OWNER's hard
+    // case (ink body, gold clasp — the capital he carries) and the WORKER's
+    // domed lunchbox (cream body, coral lid — the shift he brings). Both hang
+    // from the FAR hand (the near arm belongs to climb / facepalm), riding
+    // farHand's solved position with the walk's own swing — a held prop, never
+    // a floating decal (the audit's "nothing free-floats" rule).
+    if ((r.briefcase || r.lunchbox) && farHandRef) {
+        const swing = Math.sin(t / 340 + seed * 2.2) * 0.09;
+        ctx.save();
+        // the prop hangs FROM the hand (handle at the grip) — the case body
+        // starts at the hand line so the carry reads held, never dragged.
+        ctx.translate(farHandRef.ex, farHandRef.ey + 2);
+        ctx.rotate(swing);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = ink;
+        if (r.briefcase) {
+            (0, scene_props_1.notePropDraw)('briefcase');
+            // the hard case — ink body, gold clasp, the handle at the hand
+            ctx.fillStyle = theme_1.PALETTE.ink;
+            (0, theme_1.roundRect)(ctx, -27, -6, 54, 40, 7);
+            ctx.fill();
+            ctx.stroke();
+            // the seam + clasp
+            ctx.strokeStyle = (0, theme_1.rgba)('#F7EFD8', 0.85);
+            ctx.lineWidth = 2.6;
+            ctx.beginPath();
+            ctx.moveTo(-27, 9);
+            ctx.lineTo(27, 9);
+            ctx.stroke();
+            ctx.fillStyle = theme_1.PALETTE.gold;
+            (0, theme_1.roundRect)(ctx, -6, 5, 12, 9, 3);
+            ctx.fill();
+        }
+        else {
+            (0, scene_props_1.notePropDraw)('lunchbox');
+            // the lunchbox — cream body, coral lid, wire handle
+            ctx.fillStyle = '#F6F1E3';
+            (0, theme_1.roundRect)(ctx, -22, -4, 44, 34, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = theme_1.PALETTE.down;
+            (0, theme_1.roundRect)(ctx, -22, -4, 44, 13, 6);
+            ctx.fill();
+            ctx.strokeStyle = ink;
+            ctx.lineWidth = 3.4;
+            ctx.beginPath();
+            ctx.arc(0, -6, 10, Math.PI * 1.08, Math.PI * 1.92);
+            ctx.stroke();
+            // the latch
+            ctx.fillStyle = theme_1.PALETTE.gold;
+            (0, theme_1.roundRect)(ctx, -5, 8, 10, 7, 2.5);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+    // head — tilt + eye glints + subtle cheek warmth
+    const tiltR = (pose.lean + pose.headTilt) * D2R;
+    // AUDIT-ROUND-2 (fix 11 — HEAD YAW AT CONTENT): the whole head pivots
+    // about the NECK joint by pose.headYaw (±14°, set by the same pointBias
+    // the arms use in Stickman.poseAt). The head displaces toward the
+    // content (~10px at host scale) and its features rotate with it — a
+    // genuine 2D head turn. The pupils' 7px look travel rides ON TOP
+    // (eyeDX below), exactly as the audit specified: "the audience reads
+    // connection through the head yaw first, eyes second".
+    const yawR = (pose.headYaw ?? 0) * D2R;
+    const headCX = neckX + Math.sin(tiltR) * (10 + 24);
+    const headCY = neckY - Math.cos(tiltR) * (10 + 24);
+    bbTouch(headCX, headCY, 31 * (r.faceScale ?? 1) + 6); // FP0: the shrunken egg + crest
+    // AUDIT-ROUND-2 (fix 14): nod pulse 4 → 7px — the word-accent nod
+    // survives the 320px gate.
+    // B13: the word-accent nod rides 11px (was 7) — the head ANSWERS the
+    // accent at feed scale instead of whispering it.
+    const nod = (r.nod ?? 0) * 11;
+    // P1-1 (report): face scale for close staging — applied around the head
+    // centre so the neck attachment point stays put; only the face grows.
+    // 100-JUDGE PANEL / Phase 1 item 2 — HEAD CARICATURE, NOT FLOORS
+    // (report §6 Phase 1): "raise the becker head to 1.25x its
+    // body-proportional size and let the eye radius run to 9 units at
+    // host scale; brow arcs widen to 6px. Caricature replaces the eyeFloor
+    // mechanism on hero scales." Default faceScale 1 -> 1.25 (explicit
+    // caller overrides still win); eye radius 7.5 -> 9 and brow stroke
+    // 4.6 -> 6 below.
+    // D-8 / P1 (100-judge dossier): faceScale caps at 1.1 outside reaction
+    // windows — the 1.25 default inflated the face past caricature into
+    // googly (explicit close-up overrides still win).
+    const faceS = r.faceScale ?? 1.1;
+    // P1-1 (100-judge audit, Table 3 — HEAD REDESIGN): the shipped head
+    // (cream fill + 14px ink outline) read as "a dark ring around a tan
+    // disc — big-head/ninja-hood stick figure": the outline is heavy
+    // enough to read as a HOOD, and at 320px the interior features
+    // dissolve leaving exactly the ninja silhouette. Three styles:
+    //   'classic' — shipped (the A/B control);
+    //   'thin'    — same head, outline 14 → 9.5px: a drawn line, not a hood;
+    //   'becker'  — solid ink head, white dot eyes + white mouth, zero
+    //               interior clutter — silhouette-first, readable at 20px.
+    // A/B VERDICT (panel, 320px shock close-up): becker > thin > classic —
+    // "silhouette-first wins: every saved interior pixel becomes emotional
+    // signal". BECKER ships as the film's head. See AB_P1-1_*.png frames.
+    // 100-JUDGE DOSSIER / P1 (head v3): the film's own THUMBNAIL is the
+    // strongest character asset — an ivory-white head with ink contour and
+    // ink features — and the viewer who clicks it meets a stranger. The
+    // HOST (the only unvariant character) now ships the thumbnail head:
+    //   'ivory'   — #F6F1E3 fill, 9.5px ink contour, ink pupils in small
+    //               sclera, ink brows/mouth, the full expression rig;
+    //   'becker'  — KEPT for the prof/worker variants (cast by silhouette:
+    //               different PEOPLE stay ink-headed, with the D-8 pupil fix).
+    // 100-JUDGE VISUAL AUDIT (Fix 4 — ONE CAST LANGUAGE): the solid-ink becker
+    // heads shipped the prof/worker as a SECOND art style inside the frame —
+    // "two design languages, one film" was the panel's cast-clash conviction.
+    // The cast now wears the host's OWN head language (ivory egg + ink
+    // contour + ink dot eyes) and stays silhouette-different through GEAR
+    // and MASS: the prof keeps his bold round glasses, the worker his flat
+    // cap; both keep their ink torsos and props. Same face grammar,
+    // different people.
+    const hostIvory = !r.variant || r.variant === 'prof' || r.variant === 'worker';
+    const headStyle = r.headStyle ?? (hostIvory ? 'ivory' : 'becker');
+    const becker = headStyle === 'becker';
+    const ivory = headStyle === 'ivory';
+    const headStroke = becker ? 0 : headStyle === 'thin' || ivory ? 9.5 : perception_1.INK.headStroke;
+    ctx.save();
+    if (yawR !== 0) {
+        // fix 11: pivot about the neck joint — the head leans around its
+        // anatomical anchor, displacing toward the content
+        ctx.translate(neckX, neckY);
+        ctx.rotate(yawR);
+        ctx.translate(-neckX, -neckY);
+    }
+    // 100-JUDGE VISUAL AUDIT (Phase 1 — THE NECK BREAK): on look-turns the
+    // head TRANSLATES toward the look direction (up to 5 head-units at full
+    // yaw) on top of the neck-pivot rotation — the silhouette reads as the
+    // neck bending toward the content, the caricature turn a rigid pivot
+    // can never give. Pure function of the pose's own headYaw.
+    const neckBreak = Math.min(1, Math.abs(pose.headYaw ?? 0) / perception_1.AMP.headYawDeg) * 5 * Math.sign((pose.headYaw ?? 0) || 1);
+    ctx.translate(headCX + neckBreak, headCY + nod);
+    // PREMIUM UPGRADE 3D-3: PSEUDO-3D HEAD TURN. The head narrows as it turns
+    // (scaleX squash proportional to yaw) — a cheap 2.5D read that the head is
+    // rotating in 3D, not just pivoting in 2D. At full yaw (14°) the head
+    // compresses to 88% width, reading as a head turning away.
+    const yawMag = Math.abs((pose.headYaw ?? 0) / perception_1.AMP.headYawDeg);
+    // PLAYBOOK P3 (report §8.1 — JAW/CHEEK CHANNEL): a 12px mouth is
+    // sub-pixel at the feed; the HEAD itself must act. On the OPEN visemes
+    // (A/E/H envelope or C/E/F/H shapes) the head squash-drives: 4%
+    // vertical squash and the chin anchor drops 3 units — the whole skull
+    // reads "jaw open" at 320px. Computed here (before the transform
+    // consumes it); the mouth block below reuses the same viseme.
+    let jawOpen = 0;
+    {
+        let vmPre = 'X';
+        if (r.talk && (r.talk > 0.15) && r.wordTexts && r.wordTimes) {
+            vmPre = visemeAt(r.beatT ?? 0, r.wordTimes ?? [], r.wordTexts ?? []);
+        }
+        const openShape = vmPre === 'C' || vmPre === 'E' || vmPre === 'F' || vmPre === 'H';
+        jawOpen = openShape ? (0, easing_1.clamp01)(r.talk ?? 0) : (r.talk ?? 0) > 0.55 ? ((r.talk ?? 0) - 0.55) / 0.45 : 0;
+    }
+    // the jaw channel rides the head scale — squash on the vertical axis
+    // (jaw open = the skull shortens) and a matching widening on X (volume
+    // preservation, the classic squash-and-stretch pair).
+    // P1 head v3 (100-judge dossier): the head space shrank 13% — head-to-body
+    // proportion moved from bobblehead (≈1:3.4) toward the premium 1:4.5 band.
+    // 100-JUDGE AUDIT / fix 6.1 (THE SIGNATURE SILHOUETTE): 0.87 -> 0.93 AND
+    // the egg itself grows 32×38 -> 35×42 — the audit's prescription is a head
+    // at 1.25x body-proportional size with ONE permanent signature feature
+    // (the host's round ink glasses, drawn below). The caricature must own the
+    // feed: a bigger head + glasses ink reads as "this channel" at 320px.
+    // FP0 (Visual Verdict P0 — THE 4.5-HEAD REBALANCE): the audit measured the
+    // drawn figure at ~2.3 heads of body under a head owning ~40% of its
+    // height — bobblehead, not the Becker caricature band. The egg scales to
+    // 0.72x its local units (HEAD_SHRINK 0.93 -> 0.67) and the head centre
+    // drops onto the neck (offset 29.7 -> 24 body units). Feature floors are
+    // screen-space, so the face fill GROWS back to the premium band inside the
+    // smaller skull automatically. Target: head <= 26% of drawn height.
+    // P1 U4 (THUMBNAIL-FACE PARITY — THE BIGGER IVORY EGG): the FP0 shrink
+    // (0.67) undershot the thumbnail's head mass — the audit's parity check
+    // wants the film's close-up to read as the head the viewer clicked. The
+    // egg grows +6% (0.67 → 0.71); the thicker contour (headStroke 14) and
+    // the larger glasses wire land with it.
+    const HEAD_SHRINK = 0.71;
+    ctx.scale(faceS * HEAD_SHRINK * (1 - 0.12 * yawMag) * (1 + jawOpen * 0.04), faceS * HEAD_SHRINK * (1 - jawOpen * 0.04));
+    // Panel round 2: the head outline yaws ±14° about the neck; the FACE
+    // rotates an additional fraction of the same term about the head's own
+    // centre (+6° at full yaw) — the features lead the turn the way a real
+    // head leads a look, without breaking the audit's 14° silhouette cap.
+    ctx.rotate(tiltR * 0.6 + yawR * 0.45);
+    // soft head shadow for depth
+    // PHASE-0 (panel report §7-D4 — ONE LIGHT): the form shade used to sit at
+    // (+3, +5) — light falling on the head's lower-RIGHT while the figure's
+    // own ground shadow falls lower-LEFT, two lighting systems inside one
+    // character. It now sits (−4, +4): the shade on the side the key light
+    // (upper right) actually leaves dark.
+    ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.shadow, 0.10);
+    ctx.beginPath();
+    ctx.ellipse(-4, 4, 35, 42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // PREMIUM UPGRADE C1: EGG HEAD. The circle (34x34) is replaced with an
+    // egg ellipse (32 wide × 39 tall) + a chin extension + a nose wedge.
+    // A circle reads as a ball/bullet; an egg reads as a skull. This is the
+    // single highest-leverage character upgrade — the audience locks onto
+    // the head first. The chin gives a jawline; the nose gives facial depth.
+    // VAULT NOIR v3 — PORCELAIN MATERIAL: the head fills with a radial
+    // gradient keyed to the film's one light (lit crown, shadowed jaw). The
+    // face reads as lit porcelain on the navy vault.
+    if (becker) {
+        ctx.fillStyle = ink;
+    }
+    else if (ivory) {
+        const hg = ctx.createRadialGradient(-12, -16, 6, 2, 6, 52);
+        hg.addColorStop(0, '#FFFCEF');
+        hg.addColorStop(0.55, '#F4ECD8');
+        hg.addColorStop(1, '#C9BCA0');
+        ctx.fillStyle = hg;
+    }
+    else {
+        const hg2 = ctx.createRadialGradient(-10, -14, 6, 2, 6, 48);
+        hg2.addColorStop(0, '#F3E3C4');
+        hg2.addColorStop(1, '#B49A70');
+        ctx.fillStyle = hg2;
+    }
+    ctx.strokeStyle = ink;
+    // 100-JUDGE PANEL REPORT (fix A1 — THE HELMET RING): the contour width
+    // was in LOCAL units (9.5) multiplied by the whole head transform — at
+    // the host's rig 2.6 × faceS 1.1 × HEAD_SHRINK 0.87 it rendered as a
+    // ~24px ink ring on an 83px-wide head: 30% of the head's width, the
+    // "motorcycle helmet" read. The contour is now a SCREEN-SPACE constant:
+    // 4.5px at every rig, the drawn-line weight a premium character carries
+    // (divide the target by the accumulated scale inside the transform).
+    ctx.lineWidth = headStroke === 0 ? 0 : 4.5 / (scale * faceS * HEAD_SHRINK);
+    // the egg — taller than wide, slightly offset up for chin room
+    // B14 (Visual Quality Audit — INK CONSISTENCY): the head contour was a
+    // clean constant-width vector while every limb boiled and varied width —
+    // two ink systems on one character ("not internally consistent about
+    // what is hand-drawn"). The skull's fill AND contour now ride the same
+    // per-stroke boil offset and the stroke-width texture the body draws
+    // with: the head wobbles like the drawn body it sits on.
+    const hb = boilOff();
+    const headTex = headStroke > 0 ? lineTexNext() : 1;
+    ctx.beginPath();
+    ctx.ellipse(hb.dx, -1 + hb.dy, 35, 42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // the chin — a subtle jaw extension below the ellipse
+    ctx.beginPath();
+    ctx.moveTo(-9 + hb.dx, 37 + hb.dy);
+    ctx.quadraticCurveTo(hb.dx, 46 + hb.dy, 9 + hb.dx, 37 + hb.dy);
+    ctx.fill();
+    if (headStroke > 0) {
+        ctx.lineWidth = 4.5 / (scale * faceS * HEAD_SHRINK) * headTex;
+        ctx.beginPath();
+        ctx.ellipse(hb.dx, -1 + hb.dy, 35, 42, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    // P1 (SIGNATURE IDENTITY) — THE HAIR CREST: one triangular tuft breaking
+    // the egg's crown line. The oval head was the anonymous element — the crest
+    // gives the silhouette a name at 26px feed height (the Alan-Becker test:
+    // identify the character from the outline alone). Drawn in head-local
+    // units so it rides the yaw/nod transform stack; ink, like the contour.
+    // The worker keeps his flat cap (a cap plus a tuft reads as a costume
+    // error); every other variant carries the crest — one family silhouette.
+    if (!worker) {
+        // PHASE 2 (Fix 5 — THE FOLLOW-THROUGH CHAIN): the crest tip is the END
+        // NODE of a 3-node verlet chain rooted at the crest base — hair
+        // follow-through: the tuft lags the head's speech/walk rhythm (the
+        // anchor bobs on the talk/walk clocks), overshoots and settles with
+        // real physics. P1 (Verdict report) triples the light-hair gravity so
+        // the tuft VISIBLY settles (0.0004 -> 0.0012).
+        const tuftAnchor = (ti) => ({
+            x: -1 + Math.sin(ti / 460 + seed) * (r.talk ?? 0) * 1.2,
+            y: -26 + Math.sin(ti / 300 + seed * 1.7) * ((r.talk ?? 0) * 1.4 + (r.walkPhase !== undefined ? 0.9 : 0)),
+        });
+        const [tn1, tn2] = followChain(t, seed, tuftAnchor, { x: -0.1, y: -0.995 }, 15, 15, 0, 0.0012, 0.9);
+        // FP0 (Verdict P0 — THE COMMA CREST): the spiked triangle tuft read as
+        // a paint drip / bad wig — the accidental detail that un-designed the
+        // silhouette. One CURVED COMMA instead: a round crown pad fused with a
+        // single tapered sweep along the chain's settled tip — one stroke, one
+        // shape, a signature the feed can name.
+        ctx.fillStyle = ink;
+        ctx.beginPath();
+        ctx.moveTo(-13, -26);
+        ctx.quadraticCurveTo(tn1.x, tn1.y, tn2.x, tn2.y);
+        ctx.quadraticCurveTo(tn2.x * 0.35, tn2.y * 0.55, -4, -30);
+        ctx.quadraticCurveTo(-10, -33, -13, -26);
+        ctx.closePath();
+        ctx.fill();
+    }
+    // 100-JUDGE PANEL / Phase 1 item 4 — CAST BY SILHOUETTE (report §6
+    // Phase 1): "the worker gets a cap." A flat cap on the crown: the dome
+    // rides the egg's top arc (ink, one tone off the becker head via an
+    // ivory edge line so it separates at 320px), and a forward brim bar
+    // juts toward the look direction — the silhouette change that reads
+    // as a DIFFERENT PERSON, not a scaled host. Caps ride the yaw/nod
+    // transform stack already in place (drawn in head-local space).
+    if (worker) {
+        // the dome — a clipped arc over the crown, following the egg
+        // FP0 (Verdict P0 — CAP OFF THE BROW LINE): the old dome sank to y -22
+        // with r27 and covered the top HALF of the face — glasses vanished, the
+        // worker read as "the host in a dark skullcap". The dome rises (centre
+        // -27, r 24) so the brow band and eyes stay clear; the cap reads as
+        // worn ON the crown, not melted INTO the head.
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(0, -1, 35, 42, 0, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.fillStyle = ink;
+        ctx.beginPath();
+        ctx.ellipse(0, -27, 35, 24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // the crown seam — an ivory arc at the dome's lower edge so the cap
+        // reads as a cap ON the head, not a darker skullcap region
+        ctx.strokeStyle = (0, theme_1.rgba)('#F7EFD8', 0.9);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(0, -27, 35, 24, 0, Math.PI * 0.10, Math.PI * 0.90);
+        ctx.stroke();
+        ctx.restore();
+        // the brim — a flat bar jutting toward the look direction
+        const brimDir = (r.look ?? 0) >= 0 ? 1 : -1;
+        ctx.fillStyle = ink;
+        ctx.save();
+        ctx.translate(brimDir * 6, -23);
+        ctx.rotate(brimDir * -0.08);
+        (0, theme_1.roundRect)(ctx, brimDir > 0 ? 0 : -26, -5, 26, 10, 4);
+        ctx.fill();
+        ctx.restore();
+    }
+    // the nose — AUDIT-ROUND-3 (Fix 1): RETIRED on the becker head. The
+    // close-up panel read the white wedge as "a stray gray triangle
+    // floating off the head's left edge — a rendering artifact, not a
+    // feature". The becker head's design contract is ZERO interior
+    // clutter; the nose broke it at both scales. The legacy cream heads
+    // keep their ink hint (they are not the shipped style).
+    if (!becker) {
+        // 100-JUDGE VISUAL AUDIT (Fix 1 — THE OWNED FACE): the retired 0.22-alpha
+        // wedge floated between the eyes like an artifact. The replacement is a
+        // DRAWN nose in the caricature grammar — one confident side stroke from
+        // the glasses bridge down to a small tip shadow, ink at 0.5 so it reads
+        // as line work at every rig, not as a blush. The face gains its third
+        // anchor (eyes / nose / mouth) and stops reading as a blank egg.
+        ctx.strokeStyle = (0, theme_1.rgba)(ink, 0.5);
+        ctx.lineWidth = 2.6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(4.5, -1.5);
+        ctx.quadraticCurveTo(9.5, 5, 5.5, 9.5);
+        ctx.stroke();
+        // the nostril shadow — one small ellipse under the stroke's tip
+        ctx.fillStyle = (0, theme_1.rgba)(ink, 0.28);
+        ctx.beginPath();
+        ctx.ellipse(3.5, 10.5, 3.2, 2.1, -0.35, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // AUDIT-ROUND-2 (fix 21 — CHARACTER RIM LIGHT): the head's upper-right
+    // rim — one warm ivory arc on the light side (the film's light is
+    // upper-right; every shadow already falls lower-left). An EDGE, so it
+    // survives the 320px downsample; the head stops reading as a decal
+    // pasted on a lit room and starts reading as an object IN the light.
+    {
+        // P1 head v3 (D-8): the rim rides CLIPPED to the egg silhouette — the
+        // unclipped arc bled past the crown and read as a white patch on the
+        // head top (verified on frames 13/15). The ivory head skips it (ivory
+        // on ivory is invisible by construction).
+        if (!ivory) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(0, -1, 35, 42, 0, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.strokeStyle = '#F7EFD8';
+            ctx.lineWidth = 3.2;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            // C1: rim light follows the egg ellipse, not the old circle
+            ctx.ellipse(0, -1, 35 - 1.8, 42 - 1.8, 0, -Math.PI * 0.52, -Math.PI * 0.02);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+    // eyes + glints
+    // v10 (panel CHAR-2): GAZE WANDER — the look value drifts ±0.15 on a 7.4s
+    // cycle. A fixed pupil for 40 seconds is the "cardboard cutout" tell;
+    // the eye leading the head is what makes an illustrated character feel
+    // operated. Clamped to the existing look range; deterministic in t.
+    const lookBase = (0, easing_1.clamp01)((r.look ?? 0) * 0.5 + 0.5) * 2 - 1;
+    const look = (0, easing_1.clamp)(lookBase + Math.sin(t / 7400 + seed * 1.4) * 0.15, -1, 1);
+    const eyeDX = look * 7;
+    // AUDIT-2 / 0.2 (report §10.1, C3) — the RAISED-COSINE BLINK. The old
+    // blink was `((t + seed*700) % 4200) < 120 ? 0.12 : 1` — a single-frame
+    // pop the panel read instantly ("a step"). Now: close over ~2 frames
+    // (raised cosine into full closure), hold ~1, open over ~2 — a pure
+    // function of t, phase-shifted per seed so two hosts never blink in
+    // unison. The pop is gone; the lid lives.
+    const bt = (t + seed * 700) % 4200;
+    let closed = 0;
+    if (bt < 60)
+        closed = 0.5 * (1 - Math.cos((bt / 60) * Math.PI));
+    else if (bt < 90)
+        closed = 1;
+    else if (bt < 150)
+        closed = 0.5 * (1 + Math.cos(((bt - 90) / 60) * Math.PI));
+    // 100-JUDGE PANEL / Phase 1 item 3 — TAKE GRAMMAR: the take() helper's
+    // blink closure rides ON TOP of the idle clock (closed through the
+    // overshoot, opening across the settle — see stickman.ts take()).
+    closed = Math.max(closed, pose.blinkT ?? 0);
+    const blink = 1 - closed * 0.88;
+    // AUDIT-2 / 1.2 (report §10.2, C2) — the EXPRESSION RIG, three
+    // components, all pure functions of the existing pose weights:
+    //   surprise  (browRaise > 0.55) → sclera eyes, DILATED pupils, arched
+    //              brows (quadratic, not straight);
+    //   concerned (browAngle > 8)    → half-lid overlays, inner-up brows;
+    //   squint    (low browRaise + smile) → warm lids at 45%.
+    // Six readable emotions (surprised / worried / skeptical / delighted /
+    // deadpan / warm) from the data SceneCtx already carries.
+    const surprise = (0, easing_1.clamp01)((pose.browRaise - 0.55) / 0.45);
+    const concerned = (0, easing_1.clamp01)((pose.browAngle - 8) / 12);
+    const squint = (0, easing_1.clamp01)((0.35 - pose.browRaise) / 0.35) * (0, easing_1.clamp01)(pose.smile) * 0.45;
+    const lid = Math.max(concerned * 0.5, squint);
+    const eyeOpen = blink * (1 - lid);
+    // PANEL-12 / P0-5 (report §12.5) — TWO-STATE EYES. Above browRaise 0.6
+    // (surprise / aha / shock) the dot eyes open into 6.2px white sclera
+    // with ink pupils (+ AUDIT-2 dilation on surprise); below the threshold
+    // the dots stay (calm register). C4: dot radius 4.6 → 5.2 so the face
+    // survives the 320px feed referee.
+    // P1-4 (audit Table 3): per-eye SILHOUETTE scale — pose.eyeL/eyeR (the
+    // wry squint-smirk 0.55/1.12, warm 1.15) multiplies each eye's radii:
+    // emotions that change SHAPES survive the phone gate. And P1-1
+    // 'becker': white dot eyes on the solid ink head — the sclera swap
+    // never fires (no interior clutter; the tilt + scale carry it).
+    const eyeSL = pose.eyeL ?? 1;
+    const eyeSR = pose.eyeR ?? 1;
+    // AUDIT-ROUND-2 (fix 9 — FACE FLOOR AT SCALE): the dot eyes at the
+    // standard host rig scale (2.05) were 5.4 rig units — ~11px radius at
+    // 1080p, under 2px at the 320px feed gate ("the smile/eyes collapse
+    // into gray mush"). Scale-coupled floor: above rig scale 1.5 the eyes
+    // STOP SHRINKING WITH THE RIG AND ENLARGE — 7.5 rig units (≈15px radius
+    // at 1080p, 2.5px at the gate on the solid-ink head where the white
+    // dots carry their own contrast), spacing ±11 kept. The reaction
+    // close-ups already proved the mechanism (they scored highest).
+    // Phase 1 item 2 (report §6): the floor IS the caricature now —
+    // 7.5 -> 9 units ("let the eye radius run to 9 units at host scale").
+    // The 1.25x head + 9-unit eyes is the Becker-grade caricature that
+    // reads at 320px from ANY staging, not just close-ups.
+    // D-8 (100-judge dossier): the 9-unit bare-white ovals read googly —
+    // sclera drops to 6.5 units and INK PUPILS restore a focus point (the
+    // gaze now reads; the whites stop dominating the face). The ivory host
+    // head uses the ink-dot branch below; the becker tier is now floored in
+    // SCREEN space (the beckerEyeR definition below — PANEL ACCEPTANCE fix 7).
+    // 100-JUDGE AUDIT / fix 6.1 (THE SCREEN-PX FACE FLOOR): features sized in
+    // rig units die at the feed — the harness measured 0px of face ink at 320
+    // on the cold open. Every host feature now clamps to a SCREEN-space floor:
+    // below this local value the feature grows instead of shrinking with the
+    // rig (7.0 local ≈ 2.3px of eye radius at the 320 twin at any scale).
+    const headXform = scale * faceS * HEAD_SHRINK;
+    const featureFloor = (screenPx) => screenPx / headXform;
+    // PANEL ACCEPTANCE (audit FIX 4 — THUMBNAIL-FACE PARITY): at hero scales
+    // (rig ≥ 2.0 — the editorial and reaction stagings) the face runs the
+    // THUMBNAIL's values: eye radius 8.6 units, so the character who earns
+    // the click is the character who appears. Below hero the existing
+    // screen-space floor governs unchanged.
+    // PHASE-1 VISUAL AUDIT (Fix 4 — EYE MASS +30%, report Phase 1 "Face"):
+    // the face's single biggest feed lever. Every eye term scales 1.3×:
+    // hero dot eye 8.6 → 11.2 units, hero sclera 6.4 → 8.3, lens 11 → 13.5,
+    // becker cast eyes 5.4/4.6 → 7.0/6.0, pupils up with them — and the
+    // spacing widens ±11 → ±14 so the bigger masses still breathe. The
+    // screen-space floors scale with the same factor so the feed never
+    // starves the face again.
+    // FP0 (Verdict P0 — FACE RE-KEY): the hero constants shrink with the egg
+    // (0.72x) so the caricature keeps the premium ratios; the screen-space
+    // floors stay unchanged so the feed never starves. The lens retires as the
+    // DOMINANT feature — it is now a SECONDARY ACCENT: radius proportional to
+    // the eye (sclera x1.28), thinner wire — the brows carry the emotion.
+    const eyeR = Math.max(5.2, featureFloor(9.1), scale >= 2 ? 8.4 : 0);
+    // 100-JUDGE PANEL REPORT (defect D12 — THE SKULL READ): below rig scale
+    // 1.0 the becker head's PURE-WHITE features (sclera, brows, mouth) on
+    // the solid ink read as a grinning skull at feed scale (the coffee
+    // character drew as "a grinning raccoon standing on the letter"). The
+    // small-scale becker face switches its feature ink from pure white to
+    // the film's warm ivory (#F7EFD8 — the same tone as the rim light and
+    // the cap seam), sclera shrinks a step: the features read as drawn ink
+    // on a dark head, not as bone glow.
+    const smallHead = scale < 1.0;
+    const faceInk = smallHead ? '#F7EFD8' : '#FFFFFF';
+    // PANEL ACCEPTANCE (audit FIX 7 — THE CAST FACE FLOOR): the becker cast
+    // heads (prof / worker) now take the same screen-space floor the ivory
+    // host has — below ~6px of sclera at 1080p the eyes grow instead of
+    // shrinking with the rig, so the cast reads as faces at side-host scale.
+    const beckerEyeR = Math.max(smallHead ? 6.0 : 7.0, featureFloor(7.8));
+    // PHASE-0 (100-judge report §11 Phase 0 — THE FACE REBUILD): wire-frame
+    // professor proportions. The lens radius carries the scale; sclera and
+    // pupil DERIVE from it (pupil ≈ one-third of the lens radius), and every
+    // term keeps a screen-space floor so the face never starves at the feed.
+    // The old construction — 6.6-7.6px rounded-rect rims with ink-dot eyes and
+    // the brows overlapping the rim line — fused into the solid goggle-mask the
+    // panel convicted ("robot / raccoon / panda", never "professor").
+    // PHASE-1 FACE FILL (audit §7 — "features occupy a quarter of the face"):
+    // the lens radius carries the scale; sclera and pupil DERIVE from it
+    // (pupil ≈ one-third of the lens radius), and every term keeps a screen-
+    // space floor so the face never starves at the feed. The audit's face-area
+    // measurement put the shipped features at ~22% of the face — the fill pass
+    // raises every feature floor (lens 9.5 → 11, sclera hero 5.2 → 6.4, pupil
+    // share 0.52 → 0.55) toward the ~45% feature-area band the panel scored.
+    // FP0 (Verdict P0 — INK-DOMINANT EYES): hero sclera 8.3 → 6.2 rides the
+    // smaller egg; the pupil derives from the SCLERA (0.76 of its radius =
+    // 58% of the eye's area — past the verdict's 55% floor), never from the
+    // lens, so the eye reads ink-first at every scale.
+    const scleraR = Math.max(5.5, featureFloor(6.2), scale >= 2 ? 6.2 : 0);
+    // FP0 (Verdict P0 — GLASSES AS SECONDARY ACCENT): the lens radius is now
+    // PROPORTIONAL TO THE EYE (sclera × 1.28) instead of a fixed 13.5 units —
+    // the wire stops dominating the face and frames it.
+    const lensR = Math.max(9.0, featureFloor(6.5), scleraR * 1.28);
+    const ivoryPupR = Math.max(3.9, featureFloor(4.9), scleraR * 0.76);
+    if (becker) {
+        ctx.fillStyle = faceInk;
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, beckerEyeR * eyeSL, beckerEyeR * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, beckerEyeR * eyeSR, beckerEyeR * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // D-8: ink pupils inside the sclera — the missing focus point was the
+        // googly read's root cause
+        ctx.fillStyle = ink;
+        const pupR = 3.8 * (1 + surprise * 0.28); // PHASE-1: +30% with the eye mass
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, pupR * eyeSL, pupR * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, pupR * eyeSR, pupR * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else if (ivory) {
+        // PHASE-0: the ivory host ALWAYS wears its eyes — white sclera ovals
+        // with ink pupils (the D-8 focus-point rule), drawn here BEFORE the wire
+        // rims so the frames stroke over the eyes like worn glasses. Surprise
+        // dilates the pupils on top; per-eye silhouette scales and the blink
+        // ride the same ellipse math as every other branch.
+        // FP0 (Verdict P0 — SHOCK IS BROW + LID + JAW, NEVER BLACK OVALS): the
+        // sclera OPENS with surprise (x1.12) while the pupil's cap TIGHTENS
+        // (0.74 -> 0.60 of the sclera radius) — the gasp reads as arched brows +
+        // jaw drop + wide bright eyes, with an ivory crescent guaranteed at
+        // every scale. The filled-black-goggle failure mode is now impossible.
+        const surSclera = scleraR * (1 + surprise * 0.12);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, surSclera * eyeSL, surSclera * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, surSclera * eyeSR, surSclera * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = ink;
+        // 100-JUDGE REPORT (fix D02/D26 — THE GOGGLE READ): the pupil ran at
+        // 0.55 of the LENS radius — 89% of the sclera's diameter — and the
+        // surprise dilation (x1.28) bloated it PAST the sclera entirely, so
+        // the shock close-up drew two solid ink ovals with no white left:
+        // dark goggles, not eyes. The pupil is now capped INSIDE the sclera
+        // at 74% of its radius — still ink-dominant (the drawn-caricature
+        // standard), but a visible ivory crescent survives at every scale and
+        // the gasp can no longer swallow the eye.
+        const pup = Math.min(ivoryPupR * (1 + surprise * 0.1), surSclera * (0.74 - 0.14 * surprise)); // FP0: whites survive the gasp
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, pup * eyeSL, pup * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, pup * eyeSR, pup * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // pupil glints — the alive eye. Fix 1 keeps them but shrinks the share
+        // (0.3 → 0.22 of the pupil) so the whites never re-dominate the eye.
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(-14 + eyeDX - pup * 0.38, -6 - pup * 0.42, Math.max(0.8, pup * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(14 + eyeDX + pup * 0.38, -6 - pup * 0.42, Math.max(0.8, pup * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else if (pose.browRaise > 0.55) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, eyeR * 1.19 * eyeSL, eyeR * 1.19 * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, eyeR * 1.19 * eyeSR, eyeR * 1.19 * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = ink;
+        const pupR = 4.4 * (1 + surprise * 0.28); // AUDIT-2: pupil dilation; PHASE-1: +30% with the eye mass
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, pupR * eyeSL, pupR * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, pupR * eyeSR, pupR * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    else {
+        ctx.fillStyle = ink;
+        ctx.beginPath();
+        ctx.ellipse(-14 + eyeDX, -6, eyeR * eyeSL, eyeR * eyeOpen * eyeSL, 0, 0, Math.PI * 2);
+        ctx.ellipse(14 + eyeDX, -6, eyeR * eyeSR, eyeR * eyeOpen * eyeSR, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // AUDIT-2 / 1.2: the eyelid line — when a lid is active, an ink stroke
+    // rides the lid's lower edge so the squint/concern reads as anatomy,
+    // not as a shorter eye.
+    if (lid > 0.08 && !becker) {
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 2.6;
+        ctx.lineCap = 'round';
+        const lidY = -6 - 5.2 * (1 - lid);
+        ctx.beginPath();
+        ctx.moveTo(-19 + eyeDX, lidY);
+        ctx.lineTo(-7.5 + eyeDX, lidY - 1.5);
+        ctx.moveTo(7.5 + eyeDX, lidY - 1.5);
+        ctx.lineTo(19 + eyeDX, lidY);
+        ctx.stroke();
+    }
+    // PHASE-1 VISUAL AUDIT (Fix 4 — ONE DOMINANT BROW CHANNEL, report
+    // Phase 1 "Face"): the face carried THREE competing brow systems — the
+    // becker white double-arc, the 3-shape switch (neutral / surprise-arch /
+    // concerned-kink) — brows that fought each other for shape authority.
+    // ONE channel now: a single bold arc per side whose curvature is driven
+    // by ONE scalar, the dominant emotion (surprise − concerned): positive
+    // arches toward surprise, negative flattens toward the concern kink,
+    // zero sits at the house line. browRaise still lifts the pair,
+    // browAngle still tilts it — but the SHAPE authority is one channel,
+    // the same geometry on every head type (ink, ivory, becker).
+    const browEmo = surprise - concerned;
+    const drawBrow = (dir) => {
+        const bRaise = pose.browRaise * perception_1.AMP.browTravelPx;
+        const bAng = pose.browAngle * D2R;
+        const x0 = dir * (8 + eyeDX), x1 = dir * (24 + eyeDX);
+        // B4 RE-SPEC (Visual Quality Audit §3.1 — BROWS RIDE THE GLASSES): the
+        // rest line sits ON the lens rim (gap ≤ 3 units) instead of 5 units of
+        // ivory lift above it — the brow arch reads as attached to the face at
+        // every rig, and the travel (AMP.browTravelPx 40 → 14) keeps even the
+        // full-surprise arch inside the forehead's own band.
+        const lift = ivory ? 2.5 : 0;
+        const y0 = -15.5 - lift - bRaise - dir * Math.tan(bAng) * 7;
+        const y1 = -13.5 - lift - bRaise + dir * Math.tan(bAng) * 7;
+        ctx.strokeStyle = becker ? faceInk : ink;
+        ctx.lineWidth = Math.max(smallHead ? 5.5 : 6.5, featureFloor(7), scale >= 2 ? 9.5 : 0);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 - 12 * browEmo, x1, y1);
+        ctx.stroke();
+    };
+    drawBrow(-1);
+    drawBrow(1);
+    if (!becker && !ivory) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(-12 + eyeDX, -7.5, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(15.5 + eyeDX, -7.5, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+    } // P1-1 'becker': no glints — zero interior clutter
+    // PHASE-0 'ivory': glints moved ONTO the pupils inside the sclera branch
+    // 100-JUDGE AUDIT / fix 6.1 — THE SIGNATURE FEATURE (round ink glasses).
+    // The audit's prescription: "premium brands customize the stick man — a
+    // signature character, outfit, or accessories". The host is the film's one
+    // unvariant character, so the glasses go on the IVORY host head only (the
+    // becker cast variants stay silhouette-different: cap, mug, bare head).
+    // They are chosen because they are the Data Desk brand made flesh, they
+    // carry ~20px of solid ink into the 320px head window (the face-ink gate
+    // measured 0px BEFORE), and they END the head-style drift the audit
+    // convicted — the host is now THE character with the glasses, everywhere.
+    // VAULT NOIR v3 — THE SIGNATURE FEATURE CHANGE: the host's wire glasses
+    // are RETIRED (that was the previous film's identity). The new host's
+    // signature is the lit porcelain face + the hair crest against the navy
+    // vault — the full head is the contrast mass now. The 'prof' cast
+    // variant below keeps HIS bold glasses (a different person).
+    // (the old 3-shape brow switch retired — PHASE-1 VISUAL AUDIT: the ONE
+    // DOMINANT BROW CHANNEL above is the single brow system on every head
+    // type; the surprise-arch / concerned-kink shapes now live as the two
+    // extremes of its one curvature scalar, not as competing branches.)
+    // AUDIT-3 / §3.1 (report Phase 3.1 — DIFFERENTIATE CHARACTER TWO): the
+    // 'prof' variant's round glasses. Two BOLD stroked circles with a light
+    // lens fill + a bridge — sized to survive the 320px feed (the round-5
+    // panel: "glasses only work if they're drawn oversized/bold enough to
+    // survive the thumbnail pass"). At the coffee character's 0.75× the
+    // lenses read as a face accessory, not facial texture.
+    if (prof) {
+        // the lens fill — a light wash so the frames read as GLASSES,
+        // not as two more face lines
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(-14 + eyeDX, -5.5, 15.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(14 + eyeDX, -5.5, 15.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        // lenses — centered on the eye line, oversized on purpose
+        ctx.beginPath();
+        ctx.arc(-14 + eyeDX, -5.5, 15.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(14 + eyeDX, -5.5, 15.5, 0, Math.PI * 2);
+        ctx.stroke();
+        // the bridge
+        ctx.beginPath();
+        ctx.moveTo(-2 + eyeDX, -8.5);
+        ctx.lineTo(2 + eyeDX, -8.5);
+        ctx.stroke();
+    }
+    // mouth (v3: articulate talk envelope when speaking, panel P0-4)
+    // BLUEPRINT Phase 2: the reaction jaw multiplier reaches the mouth.
+    // P1-1: becker draws it in white on the solid head.
+    // 100-JUDGE AUDIT (Part 8.2): the mouth now takes a viseme hint, derived
+    // from the active word's first letter via visemeAt(). The same wordTimes
+    // array that drives the talk envelope also drives the viseme — zero
+    // additional data flow cost. The host call site passes the beat's word
+    // texts; without them the viseme defaults to 'X' (the original envelope).
+    // PLAYBOOK P3: jawOpen (the head squash channel) is computed above the
+    // transform stack; this block draws the mouth shape itself.
+    {
+        let vm = 'X';
+        if (r.talk && (r.talk > 0.15) && r.wordTexts && r.wordTimes) {
+            vm = visemeAt(r.beatT ?? 0, r.wordTimes ?? [], r.wordTexts ?? []);
+        }
+        // B4 RE-SPEC (Visual Quality Audit §3.1 — THE NEUTRAL SHOCK): the
+        // twist close-up rendered a hanging-armed figure with a small dot
+        // mouth — the gasp read as idle standing. Surprise above 0.55 now
+        // owns the mouth: an effective talk of ≥0.86 forces the round-O gasp
+        // register even between words, so a shocked face ALWAYS has a shocked
+        // mouth (thumbnail-face parity — the click face is the film face).
+        const mouthTalk = (r.talk ?? 0) > 0.18
+            ? (r.talk ?? 0)
+            : (surprise > 0.55 ? Math.max(0.86, surprise) : (r.talk ?? 0));
+        drawMouthV2(ctx, eyeDX, pose.smile, mouthTalk, jaw2x, becker ? faceInk : theme_1.PALETTE.ink, scale > 1.5, vm);
+    }
+    // cheek warmth — very subtle (P1-1 'becker': skipped — no interior clutter)
+    // 100-JUDGE PANEL REPORT (fix A4): cheek warmth 0.16 → 0.09 — the plush
+    // circles read as doll blush on a presenter; a whisper keeps the warmth.
+    if (!becker) {
+        ctx.fillStyle = (0, theme_1.rgba)(theme_1.PALETTE.down, 0.09);
+        ctx.beginPath();
+        ctx.ellipse(-21, 7, 5, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(21, 7, 5, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+    ctx.restore();
+    // PHASE 3 (Composition & value): the subject registers the frame-area
+    // occupancy it actually drew (bbox measured from the joints above,
+    // scaled to screen px, positioned at the draw's translate). Only
+    // subject-tagged stagings register — participants/markers stay governed
+    // by the height tiers. Group-tagged figures merge in the registry.
+    if (isSubject && FIG_BB.maxX > FIG_BB.minX) {
+        const fc = (0, composition_1.frameContext)();
+        const bbX0 = r.flip ? cx - FIG_BB.maxX * scale : cx + FIG_BB.minX * scale;
+        const bbX1 = r.flip ? cx - FIG_BB.minX * scale : cx + FIG_BB.maxX * scale;
+        (0, composition_1.registerFigureArea)(fc.sceneKey, r.figureTag ?? 'subject', bbX0, groundY + FIG_BB.minY * scale, bbX1 - bbX0, (FIG_BB.maxY - FIG_BB.minY) * scale, fc.W, fc.H, r.subjectGroup);
+    }
+}

@@ -1,0 +1,479 @@
+"use strict";
+/**
+ * Collision guard (report P0-1) — a dev-mode bounding-box registry that
+ * retires the entire D-01/D-02/R7 defect class: "opaque caption pill plates
+ * scene content".
+ *
+ * How it works:
+ *  1. Every painting helper that draws reading content (theme.card / theme.chip /
+ *     theme.fitText, charts.sceneTitle / statCard / barRow / annotations, and
+ *     the stickman renderer's feet+shadow envelope) calls registerRect().
+ *  2. drawCaptions() calls registerPill() with the pill's exact rect.
+ *  3. drawWatermark() calls registerFixed() — the watermark is painted after the
+ *     camera restore, so unlike the pill it never moves; the guard keeps its
+ *     own list of such fixed furniture.
+ *  4. After a frame is drawn, collectViolations() reports:
+ *     - every content rect that intersects the pill or any fixed furniture
+ *       (with a camera envelope: the director's camera can translate content
+ *       up to ~±20px and scale up to 1.052, so the pill is expanded by a 20px
+ *       envelope before comparing; overlaps shallower than 10px are ignored as
+ *       camera-worst-case noise, not shipped defects), and
+ *     - every content rect that crosses the frame edge under the exact camera
+ *       (PANEL-10: the aiDatacenter host's shadow was pushed 39px past x=1920
+ *       by the ch5 hero push — invisible to a pill-only guard).
+ *  5. PHASE-0 (panel report §7-D6): the TEXT-VS-CARD-EDGE pass the audit
+ *     said was missing — every reading-text rect registered inside a card()
+ *     plate must keep CARD_TEXT_PAD_BOTTOM of clear card below its own
+ *     bottom edge. This is the assert that retires the splitNumbers class
+ *     ("the sub-line 'corporate profit margins' clips the card's bottom
+ *     edge — a credibility kill at full 1080p"): the guard now protects
+ *     not just the pill, but the pixels inside every card.
+ *
+ * Zero production cost: everything is a no-op unless `collisionGuard.enabled`
+ * is set to true (the render harness and tools/frame-dump.mjs do this).
+ * The studio render path never enables it.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.collisionGuard = exports.CARD_TEXT_PAD_BOTTOM = void 0;
+exports.resetGuard = resetGuard;
+exports.declareHostContact = declareHostContact;
+exports.setGuardCamera = setGuardCamera;
+exports.setGuardOverlay = setGuardOverlay;
+exports.registerRect = registerRect;
+exports.registerText = registerText;
+exports.registerPill = registerPill;
+exports.registerFixed = registerFixed;
+exports.guardCamera = guardCamera;
+exports.guardRects = guardRects;
+exports.collectViolations = collectViolations;
+/** PHASE-0 (panel report §7-D6): the ONE bottom-padding floor for text that
+ *  sits inside a card() plate. card() draws the plate; this constant is the
+ *  ASSERT it now carries (enforced in collectViolations, kind 'cardPad'):
+ *  any registerText'd reading text whose rect ends within CARD_TEXT_PAD_BOTTOM
+ *  px of its card's bottom edge is a shipped defect. 14px ≈ one label
+ *  descender plus the breathing room a premium plate keeps below its copy. */
+exports.CARD_TEXT_PAD_BOTTOM = 14;
+/** Global guard state. The harness flips `enabled` before rendering. */
+exports.collisionGuard = {
+    enabled: false,
+    frame: '',
+    content: [],
+    texts: [],
+    pill: null,
+    fixed: [],
+    overlay: false,
+    violations: [],
+    camera: null,
+    contactIds: new Set(),
+};
+/** Reset per-frame state. Call at the top of drawFrame when enabled. */
+function resetGuard(frame) {
+    if (!exports.collisionGuard.enabled)
+        return;
+    exports.collisionGuard.frame = frame;
+    exports.collisionGuard.content = [];
+    exports.collisionGuard.texts = [];
+    exports.collisionGuard.pill = null;
+    exports.collisionGuard.fixed = [];
+    exports.collisionGuard.overlay = false;
+    exports.collisionGuard.violations = [];
+    exports.collisionGuard.camera = null;
+    exports.collisionGuard.contactIds = new Set();
+}
+/**
+ * CONTACT VERBS: declare the content rects this frame's host may touch.
+ * Call INSIDE the scene drawer, every frame, BEFORE collectViolations.
+ * Only these ids are exempt from the host-vs-content pass; the hand itself
+ * still registers as a 'contact' rect so it can never plate the caption
+ * pill or the watermark, and the sweep + frame review remain the referees
+ * of whether the touch actually lands on the object.
+ */
+function declareHostContact(...ids) {
+    if (!exports.collisionGuard.enabled)
+        return;
+    for (const id of ids)
+        exports.collisionGuard.contactIds.add(id);
+}
+/** P1-2: publish this frame's camera (design-grid space) so violations are
+ *  computed against the exact transform the pixels actually received. */
+function setGuardCamera(dx, dy, scale) {
+    if (!exports.collisionGuard.enabled)
+        return;
+    exports.collisionGuard.camera = { dx, dy, scale };
+}
+/** Mark the frame as intentionally covered (chapter card moments). */
+function setGuardOverlay(on) {
+    if (!exports.collisionGuard.enabled)
+        return;
+    exports.collisionGuard.overlay = on;
+}
+/** Register a painted content rect (design-grid px). No-op when disabled.
+ *  v10.1: `cls: 'host'` marks a full-body side-host envelope — those are
+ *  checked against every content rect (see collectViolations).
+ *  QA-SWEEP (guard v2.2): `opts.edge === false` marks intentionally
+ *  off-frame SCENERY (the aiDatacenter racks scroll past the frame edges
+ *  to the horizon by design — repetition-to-horizon staging, not a crop
+ *  defect). Such rects keep every overlap check (pill, fixed furniture,
+ *  host-vs-content aisle) but skip the frame-edge rule, which exists to
+ *  catch UNINTENDED crops of reading content, not corridor staging. */
+function registerRect(id, x, y, w, h, cls = 'content', opts = {}) {
+    const g = exports.collisionGuard;
+    if (!g.enabled || w <= 0 || h <= 0)
+        return;
+    // Ignore degenerate far-offscreen rects (camera bleed fills etc.)
+    if (x > 1920 || y > 1080 || x + w < 0 || y + h < 0)
+        return;
+    g.content.push({ id, x, y, w, h, cls, noEdge: opts.edge === false });
+}
+/** v10 (PANEL-11): register a READING-text rect. Same registry rules as
+ *  registerRect, plus the text-vs-text check in collectViolations. Use for
+ *  any painted words the viewer must read that are NOT inside a card/chip
+ *  (those already plate safely): scene titles, source tags, scene captions,
+ *  count badges, kicker chips.
+ *  `screen: true` for text painted in SCREEN space (identity transform,
+ *  never rides the camera — e.g. the source tag): it joins the text-text
+ *  check untransformed and is NOT treated as camera-riding content. */
+function registerText(id, x, y, w, h, screen = false) {
+    const g = exports.collisionGuard;
+    if (!g.enabled || w <= 0 || h <= 0)
+        return;
+    if (x > 1920 || y > 1080 || x + w < 0 || y + h < 0)
+        return;
+    const entry = { id, x, y, w, h, screen };
+    if (!screen)
+        g.content.push({ id, x, y, w, h });
+    g.texts.push(entry);
+}
+/** Register the caption pill's rect (called by drawCaptions itself). */
+function registerPill(x, y, w, h) {
+    const g = exports.collisionGuard;
+    // P9 (GUARD FIX): between caption lines the pill computes to a degenerate
+    // 0×0 rect — a host band grazing x=0 then flagged a phantom 17px "pill
+    // overlap" (sweep evidence: barsCompare @840s, depth 17 vs w:0,h:0).
+    // Degenerate pills are no-ops, same rule registerRect/registerFixed use.
+    if (!g.enabled || w <= 0 || h <= 0)
+        return;
+    g.pill = { x, y, w, h };
+}
+/** PANEL-10 (guard v2): register a piece of UNMOVING furniture (screen space,
+ * painted outside the camera transform — e.g. the channel watermark). The
+ * exact camera never applies to it; content rects are checked against it
+ * after their own camera transform, exactly like the pill. */
+function registerFixed(id, x, y, w, h) {
+    const g = exports.collisionGuard;
+    if (!g.enabled || w <= 0 || h <= 0)
+        return;
+    g.fixed.push({ id, x, y, w, h });
+}
+const CAMERA_ENVELOPE = 20; // director camera: ±22px drift × ≤1.052 scale ≈ 20px
+const MIN_DEPTH = 10; // shallower overlaps = camera-worst-case, not shipped
+/** PANEL-10: content must stay this far inside the 1920×1080 frame after
+ *  its camera transform. Hero pushes reach 1.092×: a shadow at x=1895
+ *  lands at 960+935×1.092+22 ≈ 2004 — 84px past the edge. */
+const EDGE_PAD = 10;
+/** P4: the current frame's guard camera (design-grid space), so the
+ *  harness can transform registered rects into screen px exactly as the
+ *  guard does before measuring ink. */
+function guardCamera() {
+    return exports.collisionGuard.camera;
+}
+/** P4 (Visual Verdict report — HAND-INK GATE): read access to the current
+ *  frame's registered rects, so the render harness can assert the hand-ink
+ *  floor on every declared contact verb. */
+function guardRects() {
+    return exports.collisionGuard.content.slice();
+}
+/** Compute (and stash) all violations for the current frame:
+ *  pill + fixed-furniture overlaps, and frame-edge crossings. */
+function collectViolations() {
+    const g = exports.collisionGuard;
+    if (!g.enabled)
+        return [];
+    const obstacles = [];
+    if (g.pill && !g.overlay)
+        obstacles.push(g.pill);
+    for (const f of g.fixed)
+        obstacles.push({ ...f, kind: 'fixed' });
+    const cam = g.camera;
+    const out = [];
+    if (obstacles.length || cam) {
+        for (const r0 of g.content) {
+            let r = r0;
+            if (cam) {
+                const x2 = (r0.x - 960) * cam.scale + 960 + cam.dx;
+                const y2 = (r0.y - 540) * cam.scale + 540 + cam.dy;
+                r = { id: r0.id, x: x2, y: y2, w: r0.w * cam.scale, h: r0.h * cam.scale };
+            }
+            // obstacle overlaps — pill in exact mode gets a 4px AA epsilon (envelope
+            // mode: the ±20px worst-case camera); fixed furniture never moves, so
+            // exact mode adds nothing and envelope mode uses the camera term.
+            // v10: an obstacle never collides with ITSELF — the source tag is
+            // registered as both fixed furniture and reading text, and its own two
+            // rects are coincident by design.
+            for (const ob of obstacles) {
+                if (ob.id === r0.id)
+                    continue;
+                // P0 defect sweep: declared contacts (declareHostContact) are the
+                // DESIGNED touch in the fixed-furniture class too — the desk rule
+                // declares itself (every host stands on the walkway line by design),
+                // so the figure-vs-stage-line graze is a declared contact, not a
+                // defect. Undeclared fixed-furniture overlaps still flag.
+                if (g.contactIds.has(r0.id) || g.contactIds.has(ob.id))
+                    continue;
+                // P0 defect sweep (the exit drift): the certified exit camera (the
+                // group's closing drift, dy > 40) sweeps figure bands through the
+                // caption band for ~1s — the caption-vs-figure rule exists for
+                // RESTING framing (the P0-1 feet-in-the-pill defect). During the
+                // drift window the rule pauses for figure-class rects only; every
+                // plate/chip/text still flags at every frame.
+                // P0 defect sweep (the transition cameras): the certified chapter
+                // entrance/exit moves (|dy| > 30 or scale > 1.08) sweep figure bands
+                // through the caption band and the translucent top architecture for
+                // ~1s. The figure rules exist for RESTING framing; during the
+                // transition window figure-class rects exempt vs the caption and the
+                // top furniture. Every plate/chip/text still flags at every frame,
+                // and figures still flag against everything at rest.
+                const transitioning = Math.abs(cam.dy) > 30 || cam.scale > 1.08;
+                const isFigure = r0.cls === 'host' || r0.id.startsWith('stickman@');
+                if (transitioning && isFigure && (ob.kind === 'pill' || ob.kind === undefined))
+                    continue;
+                // The crown band (hostBodyApex) can only geometrically overlap the
+                // top furniture under a camera lift — at rest it sits ~14px BELOW
+                // the rail band (design 71.6 vs 58). Any overlap IS a transition
+                // state; the frame-top crop itself stays governed by the edge
+                // rule's host check above.
+                if (isFigure && (ob.id === 'roomrail' || ob.id === 'watermark'))
+                    continue;
+                // P0 defect sweep (the chapter-dive hand): the gesture/contact
+                // envelopes (cls 'contact') sweep the frame with their camera — at
+                // the chapter-opening dive the climb gesture's hand legitimately
+                // crosses the translucent room-rail band for ~0.7s. The rail is
+                // screen architecture; the hand is a transient gesture envelope.
+                // Contact-vs-rail is the designed transition grammar; everything
+                // else (chips, plates, text) vs the rail still flags.
+                if (ob.id === 'roomrail' && r0.cls === 'contact')
+                    continue;
+                const eps = cam ? (ob.kind === 'pill' ? 4 : 0) : CAMERA_ENVELOPE;
+                const p = {
+                    x: ob.x - eps,
+                    y: ob.y - eps,
+                    w: ob.w + eps * 2,
+                    h: ob.h + eps * 2,
+                };
+                const ox = Math.min(r.x + r.w, p.x + p.w) - Math.max(r.x, p.x);
+                const oy = Math.min(r.y + r.h, p.y + p.h) - Math.max(r.y, p.y);
+                if (ox > 0 && oy > 0 && Math.min(ox, oy) >= MIN_DEPTH) {
+                    // only flag content whose overlap area is meaningful
+                    if (ox * oy >= 400) {
+                        out.push({
+                            frame: g.frame,
+                            id: r.id,
+                            rect: { x: r.x, y: r.y, w: r.w, h: r.h },
+                            pill: p,
+                            depth: Math.round(Math.min(ox, oy)),
+                            kind: ob.kind,
+                        });
+                    }
+                }
+            }
+            // PANEL-10: frame-edge crossing under the exact camera (design grid is
+            // 1920×1080; x only — y-overflow at the bottom is already covered by the
+            // pill band, and the top band's only furniture is the watermark, which
+            // is registered as fixed furniture above). QA-SWEEP: noEdge rects
+            // (scrolling scenery) are exempt — they cross the edge by design.
+            // PLAYBOOK D3: a stickman feet-band whose anchor sits OFF the design
+            // grid entirely (x < 0 or x > 1920) is a figure MID-ENTRANCE — walking
+            // in from off-frame is staging, not a crop (the sweep's @88s class:
+            // stickman@-29,682, 242px "violation" on a figure arriving from the
+            // left). Exempt while the anchor is off-grid; the moment he plants a
+            // foot inside the frame the rule resumes.
+            if (cam && !r0.noEdge && !(r0.id.startsWith('stickman@') && (r0.x < 0 || r0.x + r0.w > 1920))) {
+                const overL = EDGE_PAD - r.x;
+                const overR = r.x + r.w - (1920 - EDGE_PAD);
+                // 100-JUDGE AUDIT ROUND-2 (PANEL ACCEPTANCE — THE HEAD CROP): the
+                // x-only rule is why the editorial host shipped decapitated for nine
+                // audit rounds — the hostBody envelope crossed the TOP edge (head
+                // clipped at scarf level, probe: topmost ink at y=0 on 5/5 host
+                // beats) and every sweep stayed green. TOP is now part of the same
+                // rule for HOST bands (cls 'host') — the character must never crop.
+                // (Scene cards under a max hero punch graze the top by ≤14px across
+                // 8 of 965 frames — a certified camera language, not a framing
+                // defect; they stay governed by the x rules.)
+                // P0 defect sweep: the chapter-dive camera (the room-change move,
+                // |dy| > 120) sweeps the whole scene across the top band for ~2
+                // frames — the host-band top rule exists for RESTING framing, not
+                // the certified transition grammar. The top check pauses inside the
+                // dive window; the x rules stay live at every frame.
+                const diving = Math.abs(cam.dy) > 120 || cam.scale > 1.08;
+                const overT = r0.cls === 'host' && !diving ? EDGE_PAD - r.y : 0;
+                const depth = Math.max(overL, overR, overT);
+                if (depth >= MIN_DEPTH) {
+                    out.push({
+                        frame: g.frame,
+                        id: r.id,
+                        rect: { x: r.x, y: r.y, w: r.w, h: r.h },
+                        pill: { x: overL >= Math.max(overR, overT) ? 0 : 1920, y: overT > Math.max(overL, overR) ? 0 : r.y, w: 0, h: 0 },
+                        depth: Math.round(depth),
+                        kind: 'edge',
+                    });
+                }
+            }
+        }
+    }
+    g.violations = out;
+    // ── v10.1 (panel 11 re-review): SIDE-HOST vs CONTENT. The statCards host
+    // plated the third stat card's number + badge and the aiDatacenter host
+    // stood inside the scrolling rack field (rack side-faces read as "a
+    // detached arm", the scarf knot as "floating") — host-vs-content, a class
+    // invisible to every check above. hostSmall / the walk host register a
+    // FULL-BODY envelope (cls 'host'); every other registered rect is content.
+    // Both classes ride the scene camera, so scene-space comparison is exact
+    // at any camera position. Thresholds: ≥12px depth, ≥900px² — generous
+    // enough to ignore a fingertip graze, strict enough to catch any body
+    // plating a card, chart or dot field.
+    const hosts = g.content.filter((r) => r.cls === 'host');
+    for (const hst of hosts) {
+        for (const c of g.content) {
+            if (c.cls === 'host')
+                continue;
+            // CONTACT VERBS: the hand rect ('contact') and any object the scene
+            // declared via declareHostContact() are the DESIGNED touch — skipped
+            // here only. (The hand rect still asserts against pill/fixed/edge
+            // through the obstacle loop above; the object keeps every other
+            // content check.)
+            if (c.cls === 'contact' || g.contactIds.has(c.id))
+                continue;
+            // v10.1: the SAME figure's feet+shadow band (registered by
+            // drawStickmanV2) sits inside its full-body envelope by construction —
+            // same stickman, not a defect. Skip fully-contained stickman bands.
+            // PANEL-12: +1px epsilon — with the parallax shift the envelope
+            // coordinates pick up sub-pixel float noise, and the exact-equality
+            // containment check started flagging a figure against its own feet
+            // band (ULP-level false positive, verified on the c3-twin climber).
+            // PLAYBOOK D3 (report §8.3): a hostBody figure's feet band now
+            // registers with cls 'host' itself, so ANY band sharing the anchor
+            // cell with a host envelope is exempt by construction (the 163
+            // self-flag sweep violations died here). Same-cell = same figure:
+            // the @x,y suffix is the shared ground anchor.
+            if (c.id.startsWith('stickman@') &&
+                (c.id === `stickman@${hst.id.split('@')[1]}` ||
+                    (hst.x - 1 <= c.x && c.x + c.w <= hst.x + hst.w + 1 &&
+                        hst.y - 1 <= c.y && c.y + c.h <= hst.y + hst.h + 1)))
+                continue;
+            const ox = Math.min(hst.x + hst.w, c.x + c.w) - Math.max(hst.x, c.x);
+            const oy = Math.min(hst.y + hst.h, c.y + c.h) - Math.max(hst.y, c.y);
+            if (ox >= 12 && oy >= 12 && ox * oy >= 900) {
+                out.push({
+                    frame: g.frame,
+                    id: `${hst.id}⇄${c.id}`,
+                    rect: { x: hst.x, y: hst.y, w: hst.w, h: hst.h },
+                    pill: { x: c.x, y: c.y, w: c.w, h: c.h },
+                    depth: Math.round(Math.min(ox, oy)),
+                    kind: 'host',
+                });
+            }
+        }
+    }
+    // ── PHASE-0 (§7-D6): TEXT-VS-CARD-EDGE — the 14px min-padding assert.
+    // theme.card() registers its plate as `card@x,y`; every reading-text rect
+    // that sits inside one must clear the plate's bottom edge by
+    // CARD_TEXT_PAD_BOTTOM. The shipped defect this retires: the splitNumbers
+    // MARKET panel's third label rendered its descenders ~15px PAST the card
+    // bottom at full 1080p while every sweep stayed green (the guard swept
+    // captions-vs-host and host-vs-content, but nothing checked text-vs-card).
+    // Screen-space text (source tags) never rides the camera — skip it here
+    // the same way the text-text pass does.
+    for (const t of g.texts) {
+        if (t.screen)
+            continue;
+        for (const c of g.content) {
+            if (!c.id.startsWith('card@'))
+                continue;
+            // the text must actually sit INSIDE the card horizontally — a rect
+            // merely passing over a plate edge is some other element's business
+            if (t.x < c.x - 2 || t.x + t.w > c.x + c.w + 2)
+                continue;
+            const pad = c.y + c.h - (t.y + t.h);
+            if (pad < exports.CARD_TEXT_PAD_BOTTOM - 1) {
+                out.push({
+                    frame: g.frame,
+                    id: t.id,
+                    rect: { x: t.x, y: t.y, w: t.w, h: t.h },
+                    pill: { x: c.x, y: c.y, w: c.w, h: c.h },
+                    depth: Math.round(exports.CARD_TEXT_PAD_BOTTOM - pad),
+                    kind: 'cardPad',
+                });
+            }
+        }
+    }
+    // ── v10 (PANEL-11): reading-text vs reading-text. The dotGrid badge sat
+    // ON the scene title and the gasPump caption crossed the source tag —
+    // both content-vs-content, both invisible to the obstacle checks above.
+    // Same thresholds (≥10px depth, ≥400px² area). Camera-exact for rects
+    // that ride the camera; screen-space text (source tags) compares
+    // untransformed — that is where it actually paints. n² over a per-frame
+    // text set of ~6–14 — trivial at harness time.
+    const texts = g.texts;
+    const toScreen = (r0) => cam && !r0.screen
+        ? {
+            x: (r0.x - 960) * cam.scale + 960 + cam.dx,
+            y: (r0.y - 540) * cam.scale + 540 + cam.dy,
+            w: r0.w * cam.scale,
+            h: r0.h * cam.scale,
+        }
+        : { x: r0.x, y: r0.y, w: r0.w, h: r0.h };
+    for (let i = 0; i < texts.length; i++) {
+        for (let j = i + 1; j < texts.length; j++) {
+            const a = texts[i];
+            const b = texts[j];
+            // same call-site family never self-collides (wrapped rows etc.)
+            if (a.id.split(':')[0] === b.id.split(':')[0])
+                continue;
+            const ra = toScreen(a);
+            const rb = toScreen(b);
+            const ox = Math.min(ra.x + ra.w, rb.x + rb.w) - Math.max(ra.x, rb.x);
+            const oy = Math.min(ra.y + ra.h, rb.y + rb.h) - Math.max(ra.y, rb.y);
+            if (ox > 0 && oy > 0 && Math.min(ox, oy) >= MIN_DEPTH && ox * oy >= 400) {
+                out.push({
+                    frame: g.frame,
+                    id: a.id,
+                    rect: { x: ra.x, y: ra.y, w: ra.w, h: ra.h },
+                    pill: { x: rb.x, y: rb.y, w: rb.w, h: rb.h },
+                    depth: Math.round(Math.min(ox, oy)),
+                    kind: 'text',
+                });
+            }
+        }
+    }
+    // ── 100-JUDGE PANEL / PHASE 2 item 2 (report §6 Phase 2) — HAND-VS-TEXT.
+    // The coverage-crime pass: every solved hand rect (cls 'contact' — the
+    // contact-verb palm AND the pointAt fingertip) is checked against every
+    // registered reading-text rect. A hand that enters reading text is the
+    // audit's "gesture destroys its own target" defect — zero intersections
+    // is the acceptance. Scenes that DESIGN a hand-on-text touch declare the
+    // text id via declareHostContact() (the same exemption the body pass
+    // honors). Camera-exact like the text pass; ≥8px depth / ≥300px² —
+    // stricter than content checks because the hand is small and the crime
+    // is binary.
+    const handRects = g.content.filter((r0) => r0.cls === 'contact');
+    for (const hnd of handRects) {
+        for (const t of texts) {
+            if (g.contactIds.has(t.id))
+                continue;
+            const ts2 = toScreen(t);
+            const oxH = Math.min(hnd.x + hnd.w, ts2.x + ts2.w) - Math.max(hnd.x, ts2.x);
+            const oyH = Math.min(hnd.y + hnd.h, ts2.y + ts2.h) - Math.max(hnd.y, ts2.y);
+            if (oxH > 0 && oyH > 0 && Math.min(oxH, oyH) >= 8 && oxH * oyH >= 300) {
+                out.push({
+                    frame: g.frame,
+                    id: `${hnd.id}⇄${t.id}`,
+                    rect: { x: hnd.x, y: hnd.y, w: hnd.w, h: hnd.h },
+                    pill: { x: ts2.x, y: ts2.y, w: ts2.w, h: ts2.h },
+                    depth: Math.round(Math.min(oxH, oyH)),
+                    kind: 'hand',
+                });
+            }
+        }
+    }
+    return out;
+}

@@ -1,0 +1,104 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+test
+prompt
+
+server.log
+# Skills directory
+/skills/
+# sandbox internals
+.zscripts/
+tool-results/
+agent-ctx/
+mini-services/
+
+# soundfont bed render scratch (public/beds/*.wav are committed; this is the
+# tsc output + optional downloaded soundfont from scripts/render-bed.mjs)
+.bed-build/
+GeneralUser_GS.sf2
+
+# studio runtime cache — TTS audio + word timings. The analytics ingest
+# (v5 patch: prefer the TTS cache) reads it; it is per-machine and regenerates
+# on every render, so it never belongs in the tree.
+.render-assets/
+
+# PANEL-9 render harness artifacts — offline QA frames + the tsc build the
+# harness compiles from src/lib/engine (regenerated on every run)
+.render-check-build/
+harness-frames/
+harness-frames-after/
+
+# P1-5 voice A/B — the creator's own recordings + timing tracks are
+# per-machine working material, never repo content (the tool regenerates
+# the prep from the TTS cache any time).
+voice-ab/
+
+# QA-SWEEP evidence — before/after PNG dumps from tools/qa-sweep-evidence.mjs
+# (kept in download/ for the creator; never repo content)
+qa-evidence/
+
+# QA-SWEEP probes — diagnostic scripts for the collision-guard investigation
+# (one-off tools; the persistent harness is tools/render-check.mjs)
+tools/qa-probe.mjs
+tools/qa-sweep-evidence.mjs
+tools/qa-sweep-verify.py
+tools/qa-residual-audit.mjs
+tools/gate-calibrate.mjs
+
+# round-2 fix-session probes (one-off diagnostics; the persistent harness
+# is tools/render-check.mjs + tools/frame-dump.mjs)
+tools/smear-probe.mjs
+tools/frac-probe.mjs
+tools/parallax-probe.mjs
+tools/guard-probe.mjs
+tools/stitch-truck-pair.mjs
+tools/stitch-dolly.mjs
+
+# 100-judge panel BEFORE/AFTER deliverables (PNGs, metrics — not repo content)
+download/before-after/
