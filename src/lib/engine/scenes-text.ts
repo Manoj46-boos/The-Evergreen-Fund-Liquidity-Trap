@@ -701,7 +701,10 @@ export function quoteCardScene(g: SceneCtx): void {
     // ── PHASE-5 (the pull-quote's contact verb): the palm rests ON the
     // foot rule's right end — a hand on the desk the quote is set on,
     // 8px clear of the text zone (body core 1480-1640).
-    drawStickmanV2(ctx, 1560, H * 0.672, 1.22, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
+    // VAULT NOIR fix (sweep @628.0s): the contact host's ground 0.672 put the
+    // feet band's worst-case camera bottom 18px inside the 2-row caption pill.
+    // Ground 0.645 keeps the palm solve on the foot rule and clears the pill.
+    drawStickmanV2(ctx, 1560, H * 0.645, 1.22, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
   }
 }
 

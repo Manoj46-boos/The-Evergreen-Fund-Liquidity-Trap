@@ -1507,11 +1507,32 @@ export function sourceTag(
   // furniture with the guard.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = alpha;
-  setFont(ctx, TYPE_FLOOR, 400);
+  // VAULT NOIR fix (harness, frame 18/20/22/24): the documentary's evidence
+  // tags run long ("Source: Reuters, citing Bloomberg + investor letter ·
+  // Q1 2026 · not independently verified by Reuters" ≈ 1,900px at the 40px
+  // READ floor) — the right-anchored text ran PAST the left frame edge and
+  // shipped clipped mid-word. A footnote must always fit: shrink to fit
+  // first (40 → 30px floor — it is a glanceable source line, not body
+  // copy), then hard-truncate with an ellipsis as the last resort. The
+  // registered rect always sits inside [110, W-110].
+  let txt = `Source: ${source}`;
+  const maxW = W - 220;
+  let size = TYPE_FLOOR;
+  setFont(ctx, size, 400);
+  let tw = ctx.measureText(txt).width;
+  while (tw > maxW && size > 30) {
+    size -= 2;
+    setFont(ctx, size, 400);
+    tw = ctx.measureText(txt).width;
+  }
+  if (tw > maxW) {
+    while (tw > maxW && txt.length > 16) {
+      txt = txt.slice(0, -2).replace(/[\s\u00b7\u2022,;:\u2014\u2013-]+$/, '') + '\u2026';
+      tw = ctx.measureText(txt).width;
+    }
+  }
   ctx.fillStyle = PALETTE.inkFaint;
   ctx.textAlign = 'right';
-  const txt = `Source: ${source}`;
-  const tw = ctx.measureText(txt).width;
   ctx.fillText(txt, W - 110, y);
   registerFixed(`sourceTag:${source.slice(0, 14)}`, W - 130 - tw, y - 26, tw + 40, 38);
   // v10 (PANEL-11): the tag is READING TEXT — a scene caption landing on it

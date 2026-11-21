@@ -201,28 +201,28 @@ export function statRevealScene(g: SceneCtx): void {
 // ── wrapperMatrix — the four legal wrappers ────────────────────────────────
 const WRAPPERS = [
   {
-    num: '1', name: 'INTERVAL FUND', tone: 'up' as const,
+    num: '1', name: 'INTERVAL FUND', short: 'INTERVAL', tone: 'up' as const,
     promise: 'Repurchase offers on a pre-committed calendar — commonly quarterly, 5–25% of shares.',
     who: 'A fundamental policy. Postponement is narrow and regulated.',
     cap: 'Requests above the offer are prorated.',
     guard: 'Liquid assets must cover the offer from notice to pricing date.',
   },
   {
-    num: '2', name: 'TENDER-OFFER FUND', tone: 'gold' as const,
+    num: '2', name: 'TENDER-OFFER FUND', short: 'TENDER', tone: 'gold' as const,
     promise: 'The board decides whether to offer, when, and how large — quarterly is an expectation.',
     who: 'THE BOARD. Same ad, materially different rights.',
     cap: 'Set offer by offer.',
     guard: 'Whatever the board adopts.',
   },
   {
-    num: '3', name: 'NON-TRADED BDC', tone: 'down' as const,
+    num: '3', name: 'NON-TRADED BDC', short: 'BDC', tone: 'down' as const,
     promise: 'Private credit vehicles with quarterly repurchases, often capped around 5%.',
     who: 'The board may amend, suspend or modify the program.',
     cap: '≈5% of shares, program by program.',
     guard: 'Governed by the fund\u2019s own documents and applicable law.',
   },
   {
-    num: '4', name: 'ELTIF (EUROPE)', tone: 'up' as const,
+    num: '4', name: 'ELTIF (EUROPE)', short: 'ELTIF', tone: 'up' as const,
     promise: 'A regulatory label, not one liquidity design — closed-ended forms still exist.',
     who: 'Managers set notice periods, holding periods, tools.',
     cap: 'Fund by fund.',
@@ -308,7 +308,7 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       ctx.stroke();
     }
     ctx.restore();
-    colHead(ctx, x + 26, top + 30, cw, wr.num, isFocus ? wr.name : wr.name.split(' ')[0], p, isFocus);
+    colHead(ctx, x + 26, top + 30, cw, wr.num, isFocus && mode !== 'summary' ? wr.name : wr.short, p, isFocus);
     const tn = TONE(wr.tone);
     if (isFocus && mode !== 'summary') {
       // the focused wrapper's ledger — three standing rows; the guard row
@@ -381,8 +381,8 @@ export function flowLiquidityScene(g: SceneCtx): void {
   ctx.fillStyle = PALETTE.gold;
   ctx.fillRect(180, 246, 300, 6);
 
-  const top = H * 0.295;
-  const rowH = 96;
+  const top = H * 0.285;
+  const rowH = 88;
   const lx = 200;
   const lw = W * 0.4;
   // the pipes — drawn BEFORE the rows so the cards own their plane
@@ -412,6 +412,9 @@ export function flowLiquidityScene(g: SceneCtx): void {
     ctx.save();
     ctx.globalAlpha = e;
     const stress = mode === 'stress' && (i === 0 || i === 1);
+    // VAULT NOIR fix: rows compact to h 76 — the fifth source card's
+    // registered bottom (786 at the old pitch) crossed the 2-row caption
+    // pill under the certified camera (sweep @524-560s).
     card(ctx, lx, y, lw, rowH - 12, { r: 22, tint: stress ? TONE('down').main : undefined });
     // the valve dot
     ctx.fillStyle = stress ? PALETTE.down : TONE(src.tone).main;
@@ -420,11 +423,11 @@ export function flowLiquidityScene(g: SceneCtx): void {
     ctx.fill();
     setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
     ctx.fillStyle = PALETTE.ink;
-    ctx.fillText(src.k, lx + 72, y + 36, lw - 90);
+    ctx.fillText(src.k, lx + 72, y + 34, lw - 90);
     if (mode === 'conditions' || mode === 'stress') {
       setFont(ctx, 28, 400);
       ctx.fillStyle = PALETTE.inkFaint;
-      ctx.fillText(src.v, lx + 72, y + 62, lw - 90);
+      ctx.fillText(src.v, lx + 72, y + 60, lw - 90);
     }
     ctx.restore();
   });
@@ -603,8 +606,8 @@ const CASES = [
     tab: 'BCRED', fund: 'Blackstone Private Credit Fund', tone: 'up' as const,
     chip: 'NON-TRADED BDC',
     stats: [
-      { big: 'Q1', label: 'requests > 5% — board upsized the offer to 7%, fulfilled ALL; ~$2B new subscriptions', tag: 'March 2026 SEC filing' },
-      { big: 'Q2', label: 'requests \u2248 10% — fulfilled 5%; inflows \u2248 2% NAV, net outflow \u2248 3%', tag: 'June 2026 letter' },
+      { big: 'Q1', label: 'requests > 5% — upsized to 7%, ALL met; ~$2B inflows', tag: 'March 2026 SEC filing' },
+      { big: 'Q2', label: 'requests ≈ 10% — fulfilled 5%; net outflow ≈ 3%', tag: 'June 2026 letter' },
     ],
     src: 'BCRED SEC filings · March & June 2026',
   },
@@ -651,8 +654,11 @@ export function caseFilesScene(g: SceneCtx): void {
   });
 
   // the case card
+  // VAULT NOIR fix: the card bottom rises to CAPTION_ZONE_TOP − 51 (749) —
+  // at −30 (770) the registered bottom crossed the 2-row pill under the
+  // certified camera (sweep @720-872s, 10-12px).
   const top = H * 0.30;
-  const bot = CAPTION_ZONE_TOP - 30;
+  const bot = CAPTION_ZONE_TOP - 51;
   const e0 = easeOutCubic(clamp01((t - 350) / 650));
   ctx.save();
   ctx.globalAlpha = e0;
@@ -668,9 +674,12 @@ export function caseFilesScene(g: SceneCtx): void {
   });
 
   // the stat rows
-  let sy = top + 165;
+  // VAULT NOIR fix: rows compact (146 header + 126 pitch) and the tag chip
+  // clamps to the card bottom — the old 165/140 pitch put the second stat's
+  // tag chip past the card under 2-line labels.
+  let sy = top + 146;
   const cardRight = W - 180 - 40;
-  const rowAdvance = 140;
+  const rowAdvance = 126;
   const chipClamp = (x: number, text: string, size: number): number => {
     const wch = chipWidth(ctx, text, { size, padX: 22 });
     return Math.min(x, cardRight - wch);
@@ -692,16 +701,16 @@ export function caseFilesScene(g: SceneCtx): void {
     setFont(ctx, 84, 700, FONT_DISPLAY);
     ctx.fillStyle = TONE(i === 1 && highlight === 'par' ? 'up' : c.tone).main;
     const bigW2 = Math.min(ctx.measureText(st.big).width, 280);
-    ctx.fillText(st.big, 240, sy + 66);
+    ctx.fillText(st.big, 240, sy + 62);
     // the label
     setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
     const lines = wrapText(ctx, st.label, cardRight - 300 - bigW2, 40, 400);
     ctx.fillStyle = PALETTE.ink;
-    lines.slice(0, 3).forEach((ln, li) => ctx.fillText(ln, 240 + bigW2 + 56, sy + 26 + li * 50));
+    lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, 240 + bigW2 + 56, sy + 26 + li * 50));
     // the tag chip — clamped inside the card
     if (st.tag) {
       const tagSize = Math.max(LABEL_FLOOR, 34);
-      const tagY = sy + 26 + Math.min(lines.slice(0, 3).length, 3) * 50 + 6;
+      const tagY = Math.min(sy + 26 + Math.min(lines.slice(0, 2).length, 2) * 50 + 6, bot - 70);
       chip(ctx, st.tag.toUpperCase(), chipClamp(240 + bigW2 + 56, st.tag.toUpperCase(), tagSize), tagY, {
         bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.5), size: tagSize,
       });
@@ -779,12 +788,17 @@ export function navGapScene(g: SceneCtx): void {
 
   if (hypothetical) {
     // ── the two towers ──
-    const baseY = H * 0.78;
+    // VAULT NOIR fix: the towers previously based at H*0.78 (842) — inside
+    // the 2-row caption pill band (top ≈ 796); the pill plated their lower
+    // 46px every spoken frame. They now base at H*0.73 with 0.34H height:
+    // bases 788 (7px above the worst-case pill), tops ≈ 421 (22px below the
+    // top chip row).
+    const baseY = H * 0.73;
     const tw = 240;
     const nx = W * 0.30 - tw / 2;
     const ex = W * 0.58 - tw / 2;
-    const h100 = (H * 0.42) * 1.0;
-    const h90 = (H * 0.42) * 0.9;
+    const h100 = (H * 0.34) * 1.0;
+    const h90 = (H * 0.34) * 0.9;
     const e1 = easeOutCubic(clamp01((t - 400) / 800));
     const e2 = easeOutCubic(clamp01((t - 1100) / 800));
     // the NAV tower (brass)
@@ -834,13 +848,15 @@ export function navGapScene(g: SceneCtx): void {
       ctx.fillText('THE GAP = WHO BEARS IT', nx + tw + 46, baseY - h90 - 20);
       ctx.restore();
     }
-    // the flow captions
+    // the flow captions — moved to the top chip row (right of the
+    // HYPOTHETICAL chip): at H*0.685 the chip sat inside the tower band
+    // AND its registered bottom crossed the caption pill under camera.
     const fe = easeOutCubic(clamp01((t - 1900) / 700));
     if (fe > 0 && stage >= 5) {
       ctx.save();
       ctx.globalAlpha = fe;
       const exitDir = stage === 6 ? 'UNDERSTATED NAV: STAYERS GAIN' : 'EXIT AT 100 FIRST: STAYERS BEAR \u221210';
-      chip(ctx, exitDir, 180, H * 0.685, {
+      chip(ctx, exitDir, 900, 262, {
         bg: PALETTE.chipBg, fg: stage === 6 ? PALETTE.upVivid : PALETTE.downVivid,
         border: rgba(stage === 6 ? PALETTE.up : PALETTE.down, 0.7),
         size: LABEL_FLOOR, iconDot: stage === 6 ? PALETTE.up : PALETTE.down,
@@ -854,46 +870,61 @@ export function navGapScene(g: SceneCtx): void {
       { k: 'THE METHODS', v: 'Discounted cash flows · comparable transactions · credit spreads · borrower assumptions. Independent firms contribute; an annual audit adds scrutiny.', tone: 'gold' as const, at: 1 },
       { k: 'THE FRICTION', v: 'Private-asset valuations adjust more slowly than public benchmarks. If investors believe NAV will fall, they redeem before the markdown.', tone: 'down' as const, at: 2 },
     ];
-    let ry = H * 0.315;
+    let ry = H * 0.30;
     rows.forEach((r) => {
-      if (stage < r.at + 1) return;
+      // VAULT NOIR fix: the FIRST row now shows at stage 0 — the old
+      // `stage < r.at + 1` gate shipped an empty title-only frame for the
+      // whole stage-0 beat (the harness feed-density gate caught it at
+      // 27.9% designed content). Rows raise H*0.30 + i·140 (h 128): the
+      // third card's registered bottom 732 clears the 2-row pill under
+      // the certified 1.06 camera envelope.
+      if (stage < r.at) return;
       const e = easeOutCubic(clamp01((t - 400 - r.at * 500) / 650));
       if (e <= 0) return;
       ctx.save();
       ctx.globalAlpha = e;
-      card(ctx, 240, ry, W - 700, 136, { r: 30, tint: TONE(r.tone).main });
+      card(ctx, 240, ry, W - 700, 128, { r: 30, tint: TONE(r.tone).main });
       setFont(ctx, 46, 700, FONT_DISPLAY);
       ctx.fillStyle = TONE(r.tone).main;
-      ctx.fillText(r.k.toUpperCase(), 300, ry + 52, W - 820);
+      ctx.fillText(r.k.toUpperCase(), 300, ry + 48, W - 820);
       setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
       const lines = wrapText(ctx, r.v, W - 880, 34, 400);
       ctx.fillStyle = PALETTE.inkSoft;
-      lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, 300, ry + 88 + li * 40));
+      lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, 300, ry + 84 + li * 36));
       ctx.restore();
-      ry += 150;
+      ry += 140;
     });
     if (stage === 0) {
       const e = easeOutCubic(clamp01((t - 1000) / 600));
       if (e > 0) {
         ctx.save();
         ctx.globalAlpha = e;
-        chip(ctx, 'NOT INVENTED — BUT STILL AN ESTIMATE', 240, H * 0.715, {
+        // VAULT NOIR fix: the chip moves to the TOP row (under the gold
+        // rule) — at H*0.715 its registered bottom crossed the caption
+        // pill on every spoken frame.
+        chip(ctx, 'NOT INVENTED — BUT STILL AN ESTIMATE', 180, 262, {
           bg: PALETTE.chipBg, fg: PALETTE.inkSoft, border: PALETTE.cardBorder, size: LABEL_FLOOR,
         });
         ctx.restore();
       }
     }
   }
-  sourceTag(ctx, W, 'Framework: SEC fair-value requirements · Federal Reserve FEDS note (Oct 2026) — valuation opacity and redemption incentives', H - 56);
+  sourceTag(ctx, W, 'SEC fair-value requirements · Federal Reserve FEDS note (Oct 2026) — valuation opacity and redemption incentives', H - 56);
 }
 
 // ── feeStack — the BCRED fee layers ────────────────────────────────────────
+// VAULT NOIR fix: `at` now starts at 0 — the stage-0 beat previously gated
+// EVERY row behind stage ≥ 1 and shipped an empty title-only frame for its
+// full duration (the harness feed-density gate caught it). Rows compact to
+// h 84 / 92px pitch so the five-layer stack ends at 781 — above the 2-row
+// caption pill — and the warning chip becomes a second TOP chip (the old
+// H*0.735 position collided with the pill on every spoken frame).
 const FEES = [
-  { k: 'MANAGEMENT', v: '1.25% of NAV annually', tone: 'gold' as const, at: 1 },
-  { k: 'INCOME INCENTIVE', v: '12.5% of net investment income — 5% hurdle + catch-up', tone: 'up' as const, at: 1 },
-  { k: 'CAPITAL GAINS ALLOCATION', v: '12.5% on realized gains, net of losses', tone: 'up' as const, at: 1 },
-  { k: 'SHARE CLASS (S)', v: '0.85% distribution & servicing + up to 3.5% upfront placement', tone: 'down' as const, at: 2 },
-  { k: 'STRUCTURE LAYERS', v: 'fund-of-funds expenses · financing costs in a levered vehicle', tone: 'down' as const, at: 3 },
+  { k: 'MANAGEMENT', v: '1.25% of NAV annually', tone: 'gold' as const, at: 0 },
+  { k: 'INCOME INCENTIVE', v: '12.5% of net investment income — 5% hurdle + catch-up', tone: 'up' as const, at: 0 },
+  { k: 'CAPITAL GAINS ALLOCATION', v: '12.5% on realized gains, net of losses', tone: 'up' as const, at: 0 },
+  { k: 'SHARE CLASS (S)', v: '0.85% distribution & servicing + up to 3.5% upfront placement', tone: 'down' as const, at: 1 },
+  { k: 'STRUCTURE LAYERS', v: 'fund-of-funds expenses · financing costs in a levered vehicle', tone: 'down' as const, at: 2 },
 ];
 
 export function feeStackScene(g: SceneCtx): void {
@@ -910,9 +941,22 @@ export function feeStackScene(g: SceneCtx): void {
   const e = easeOutCubic(clamp01(t / 500));
   ctx.save();
   ctx.globalAlpha = e;
-  chip(ctx, 'BCRED TERMS · AN EXAMPLE, NOT AN INDUSTRY AVERAGE', 180, H * 0.245, {
+  // the two TOP chips — the example disclaimer + (stage ≥ 1) the warning
+  // VAULT NOIR fix: chip 1 shortened — at the full text the pair's right
+  // edge (1826) crossed the frame-edge envelope under the certified camera
+  // (sweep @1080-1134s, edge 11-18px).
+  const w1 = chip(ctx, 'BCRED TERMS — AN EXAMPLE, NOT AN AVERAGE', 180, H * 0.245, {
     bg: PALETTE.chipBg, fg: PALETTE.inkSoft, border: PALETTE.cardBorder, size: LABEL_FLOOR,
   });
+  if (stage >= 1) {
+    const we = easeOutCubic(clamp01((t - 1600) / 650));
+    if (we > 0) {
+      ctx.globalAlpha = e * we;
+      chip(ctx, 'EACH FEE HAS ITS OWN BASE', 180 + w1 + 24, H * 0.245, {
+        bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.7), size: LABEL_FLOOR, iconDot: PALETTE.goldDisplay,
+      });
+    }
+  }
   ctx.restore();
 
   // the stacked layers
@@ -920,8 +964,8 @@ export function feeStackScene(g: SceneCtx): void {
   const lw = W * 0.52;
   FEES.forEach((f, i) => {
     if (stage < f.at) return;
-    const y = H * 0.32 + i * 128;
-    const fe = easeOutCubic(clamp01((t - 500 - (f.at - 1) * 900 - i * 120) / 650));
+    const y = H * 0.305 + i * 92;
+    const fe = easeOutCubic(clamp01((t - 500 - i * 160) / 650));
     if (fe <= 0) return;
     ctx.save();
     ctx.globalAlpha = fe;
@@ -930,32 +974,20 @@ export function feeStackScene(g: SceneCtx): void {
     gr.addColorStop(0, rgba(tn.main, 0.85));
     gr.addColorStop(1, rgba(tn.main, 0.45));
     ctx.fillStyle = gr;
-    roundRect(ctx, lx, y, lw * (1 - i * 0.06), 104, 14);
+    roundRect(ctx, lx, y, lw * (1 - i * 0.06), 84, 14);
     ctx.fill();
     ctx.strokeStyle = rgba(PALETTE.goldDisplay, 0.5);
     ctx.lineWidth = 2;
-    roundRect(ctx, lx, y, lw * (1 - i * 0.06), 104, 14);
+    roundRect(ctx, lx, y, lw * (1 - i * 0.06), 84, 14);
     ctx.stroke();
     setFont(ctx, LABEL_FLOOR, 700);
     ctx.fillStyle = PALETTE.ink;
-    ctx.fillText(f.k, lx + 36, y + 44, lw - 72);
+    ctx.fillText(f.k, lx + 36, y + 34, lw - 72);
     setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
     ctx.fillStyle = PALETTE.inkSoft;
-    ctx.fillText(f.v, lx + 36, y + 84, lw - 72);
+    ctx.fillText(f.v, lx + 36, y + 66, lw - 72);
     ctx.restore();
   });
-  // the "not one number" warning
-  if (stage >= 1) {
-    const we = easeOutCubic(clamp01((t - 1600) / 650));
-    if (we > 0) {
-      ctx.save();
-      ctx.globalAlpha = we;
-      chip(ctx, 'NOT ONE NUMBER — DIFFERENT BASES', lx, H * 0.735, {
-        bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.7), size: LABEL_FLOOR, iconDot: PALETTE.goldDisplay,
-      });
-      ctx.restore();
-    }
-  }
   // the right rail — the professional question
   if (stage >= 2) {
     const qe = easeOutCubic(clamp01((t - 1400) / 700));
@@ -973,7 +1005,7 @@ export function feeStackScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, 'Source: BCRED published offering terms (Class S example) · recheck current terms before any allocation decision', H - 56);
+  sourceTag(ctx, W, 'BCRED published offering terms (Class S example) · recheck current terms before any allocation decision', H - 56);
 }
 
 // ── bullCase — the strongest honest bull case ──────────────────────────────
@@ -1018,15 +1050,19 @@ export function bullCaseScene(g: SceneCtx): void {
   ctx.fillRect(180, 246, 300, 6);
 
   // the panel — a single glass card with the ledger rows
+  // VAULT NOIR fix: rows compact to a 74px pitch from top+146 — the old
+  // 92px pitch put the fourth row's baseline at 781, BELOW the card bottom
+  // (740) and under the 2-row caption pill (the pill plated it on every
+  // spoken frame — verified on harness frame 21-bullCase).
   const top = H * 0.32;
   const e0 = easeOutCubic(clamp01((t - 350) / 600));
   ctx.save();
   ctx.globalAlpha = e0;
-  card(ctx, 240, top, W - 820, CAPTION_ZONE_TOP - 60 - top, { r: 34, glow: rgba(PALETTE.gold, 0.12) });
+  card(ctx, 240, top, W - 820, CAPTION_ZONE_TOP - 74 - top, { r: 34, glow: rgba(PALETTE.gold, 0.12) });
   ctx.restore();
   setFont(ctx, 56, 700, FONT_DISPLAY);
   ctx.fillStyle = TONE(data.tone).main;
-  ctx.fillText(data.title.toUpperCase(), 300, top + 84, W - 940);
+  ctx.fillText(data.title.toUpperCase(), 300, top + 80, W - 940);
   data.rows.forEach((r, i) => {
     const e = easeOutCubic(clamp01((t - 700 - i * 420) / 600));
     if (e <= 0) return;
@@ -1037,33 +1073,34 @@ export function bullCaseScene(g: SceneCtx): void {
     ctx.lineWidth = 5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(310, top + 160 + i * 92 - 10);
-    ctx.lineTo(322, top + 160 + i * 92 + 2);
-    ctx.lineTo(344, top + 160 + i * 92 - 18);
+    ctx.moveTo(310, top + 146 + i * 74 - 10);
+    ctx.lineTo(322, top + 146 + i * 74 + 2);
+    ctx.lineTo(344, top + 146 + i * 74 - 18);
     ctx.stroke();
     setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
     ctx.fillStyle = PALETTE.ink;
-    ctx.fillText(r, 372, top + 168 + i * 92, W - 1080);
+    ctx.fillText(r, 372, top + 154 + i * 74, W - 1080);
     ctx.restore();
   });
 
-  // the verdict chip on the cost/mismatch sides
+  // the verdict chip on the cost/mismatch sides — moved up with the rows
   if (side === 'cost' || side === 'mismatch') {
     const e = easeOutCubic(clamp01((t - 1900) / 650));
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, 'IMPLEMENTATION — NOT OUTPERFORMANCE', 300, CAPTION_ZONE_TOP - 130, {
+      chip(ctx, 'IMPLEMENTATION — NOT OUTPERFORMANCE', 300, CAPTION_ZONE_TOP - 136, {
         bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.7), size: Math.max(LABEL_FLOOR, 34), iconDot: PALETTE.goldDisplay,
       });
       ctx.restore();
     }
   }
 
-  // the host — presenting, right side
+  // the host — presenting, right side (ground H*0.63: the feet band's
+  // worst-case camera bottom clears the 2-row pill)
   const scale = 1.45;
   const hx = W * 0.815;
-  const hy = H * 0.645;
+  const hy = H * 0.63;
   const arrive = Stickman.poseAt(t, { gesture: side === 'cost' || side === 'mismatch' ? 'wry' : 'present', speaking: g.speaking, sentenceId: g.sentenceId, wordTimes: g.gWordTimes, words: g.wordTexts });
   registerFigure(g.beat.scene.sceneKey ?? 'finance', 'host', 'subject', scale, H, true);
   drawStickmanV2(ctx, hx, hy, scale, t, {
@@ -1101,12 +1138,16 @@ export function auditChecklistScene(g: SceneCtx): void {
 
   if (mode === 'words') {
     // the condensed eight words — the screenshot moment
+    // VAULT NOIR fix: cards compact to ch 160 / 20px gap from H*0.285 and
+    // the chip rises to H*0.625 — the old layout put the second card row's
+    // bottom at 830 and the chip at 756, both inside the 2-row caption
+    // pill band (the sweep flagged card@180,610 + chip @1553-1556s).
     const cols = 4, rows = 2;
     const cw = (W - 360 - (cols - 1) * 36) / cols;
-    const ch = 220;
+    const ch = 160;
     AUDIT_QS.forEach((qa, i) => {
       const cx = 180 + (i % cols) * (cw + 36);
-      const cy = H * 0.33 + Math.floor(i / cols) * (ch + 34);
+      const cy = H * 0.285 + Math.floor(i / cols) * (ch + 20);
       const e = easeOutCubic(clamp01((t - 300 - i * 160) / 550));
       if (e <= 0) return;
       ctx.save();
@@ -1115,10 +1156,10 @@ export function auditChecklistScene(g: SceneCtx): void {
       setFont(ctx, 26, 700);
       ctx.fillStyle = PALETTE.goldInk;
       ctx.textAlign = 'center';
-      ctx.fillText(String(i + 1).padStart(2, '0'), cx + cw / 2, cy + 44);
+      ctx.fillText(String(i + 1).padStart(2, '0'), cx + cw / 2, cy + 40);
       setFont(ctx, Math.min(48, cw / 4.4), 700, FONT_DISPLAY);
       ctx.fillStyle = PALETTE.ink;
-      ctx.fillText(qa.w, cx + cw / 2, cy + ch / 2 + 30, cw - 40);
+      ctx.fillText(qa.w, cx + cw / 2, cy + ch / 2 + 26, cw - 40);
       ctx.restore();
     });
     ctx.textAlign = 'left';
@@ -1126,7 +1167,7 @@ export function auditChecklistScene(g: SceneCtx): void {
     if (se > 0) {
       ctx.save();
       ctx.globalAlpha = se;
-      chip(ctx, 'SCREENSHOT THIS — IT FORCES THE FUTURE INTO THE DECISION', W / 2 - 520, H * 0.70, {
+      chip(ctx, 'SCREENSHOT THIS — IT FORCES THE FUTURE INTO THE DECISION', W / 2 - 520, H * 0.625, {
         bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.75), size: LABEL_FLOOR, iconDot: PALETTE.goldDisplay,
       });
       ctx.restore();
@@ -1135,9 +1176,12 @@ export function auditChecklistScene(g: SceneCtx): void {
   }
 
   // the rail — eight numbered pills, the active one lit
+  // VAULT NOIR fix: the rail compresses to end at 740 — the old rowH ran
+  // the eighth pill's registered bottom to 748, inside the pill band under
+  // the certified camera envelope.
   const railX = 180;
   const railW = 330;
-  const rowH = (CAPTION_ZONE_TOP - 40 - H * 0.30) / 8;
+  const rowH = (CAPTION_ZONE_TOP - 100 - H * 0.30) / 8;
   AUDIT_QS.forEach((qa, i) => {
     const y = H * 0.30 + i * rowH;
     const active = i === q;
@@ -1162,10 +1206,11 @@ export function auditChecklistScene(g: SceneCtx): void {
     const qa = AUDIT_QS[q];
     const qx = railX + railW + 70;
     const qw = W - qx - 180;
+    const cardBot = CAPTION_ZONE_TOP - 90;
     const e0 = easeOutCubic(clamp01((t - 350) / 600));
     ctx.save();
     ctx.globalAlpha = e0;
-    card(ctx, qx, H * 0.30, qw, CAPTION_ZONE_TOP - 60 - H * 0.30, { r: 34, glow: rgba(PALETTE.gold, 0.16) });
+    card(ctx, qx, H * 0.30, qw, cardBot - H * 0.30, { r: 34, glow: rgba(PALETTE.gold, 0.16) });
     ctx.restore();
     setFont(ctx, 28, 700);
     ctx.fillStyle = PALETTE.goldInk;
@@ -1178,7 +1223,7 @@ export function auditChecklistScene(g: SceneCtx): void {
     setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
     const lines = wrapText(ctx, qa.sub, qw - 96, 40, 400);
     ctx.fillStyle = PALETTE.inkSoft;
-    lines.slice(0, Math.floor((CAPTION_ZONE_TOP - 60 - subY) / 52)).forEach((ln, li) => ctx.fillText(ln, qx + 48, subY + li * 52));
+    lines.slice(0, Math.max(0, Math.floor((cardBot - 14 - subY) / 52))).forEach((ln, li) => ctx.fillText(ln, qx + 48, subY + li * 52));
   }
   sourceTag(ctx, W, 'The author\u2019s synthesis — components grounded in the SEC, Federal Reserve, fund-document and valuation sources in this film', H - 56);
 }
@@ -1197,9 +1242,14 @@ export function systemMapScene(g: SceneCtx): void {
   ctx.fillRect(180, 246, 300, 6);
 
   // the ring — the manager at centre, three investor classes around
+  // VAULT NOIR fix: the ring lifts to cy H*0.47 with R H*0.18 — the old
+  // cy 0.55 / R 0.24 put the ring's bottom arc (853) and the two lower
+  // nodes (790) inside the caption pill band, and left no clear row for
+  // the verdict chip (which then collided with both the nodes and the
+  // pill — sweep @1600-1615s).
   const cx = W * 0.40;
-  const cy = H * 0.55;
-  const R = H * 0.24;
+  const cy = H * 0.47;
+  const R = H * 0.18;
   const ringE = easeOutCubic(clamp01((t - 300) / 800));
   ctx.save();
   ctx.globalAlpha = ringE;
@@ -1236,8 +1286,8 @@ export function systemMapScene(g: SceneCtx): void {
   // the three investor nodes
   const nodes = [
     { k: 'ENTERING', ang: -Math.PI / 2, tone: 'up' as const, v: 'buy at NAV' },
-    { k: 'EXITING', ang: Math.PI / 6, tone: 'down' as const, v: 'redeem at NAV — subject to the window' },
-    { k: 'REMAINING', ang: (Math.PI * 5) / 6, tone: 'gold' as const, v: 'bear what the exit leaves' },
+    { k: 'EXITING', ang: Math.PI / 6, tone: 'down' as const, v: 'redeems at the window' },
+    { k: 'REMAINING', ang: (Math.PI * 5) / 6, tone: 'gold' as const, v: 'bear what exits leave' },
   ];
   nodes.forEach((nd, i) => {
     const e = easeOutCubic(clamp01((t - 700 - i * 300) / 600));
@@ -1271,13 +1321,15 @@ export function systemMapScene(g: SceneCtx): void {
   });
   ctx.textAlign = 'left';
 
-  // the verdict chips (stage 2 = the contract decides)
+  // the verdict chips (stage 2 = the contract decides) — fixed LEFT column,
+  // above the caption band: the old H*0.715 position collided with the
+  // lower nodes AND the pill (sweep @1600-1615s).
   if (stage >= 1) {
     const e = easeOutCubic(clamp01((t - 1600) / 650));
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, stage === 2 ? 'THE CONTRACT DECIDES WHO GETS PAID — AND WHO WAITS' : 'ENOUGH LIQUIDITY: THE SYSTEM WORKS QUIETLY', Math.max(180, cx - 430), H * 0.715, {
+      chip(ctx, stage === 2 ? 'THE CONTRACT DECIDES WHO GETS PAID — AND WHO WAITS' : 'ENOUGH LIQUIDITY: THE SYSTEM WORKS QUIETLY', 180, H * 0.652, {
         bg: PALETTE.chipBg, fg: stage === 2 ? PALETTE.downVivid : PALETTE.upVivid,
         border: rgba(stage === 2 ? PALETTE.down : PALETTE.up, 0.7),
         size: LABEL_FLOOR, iconDot: stage === 2 ? PALETTE.down : PALETTE.up,
@@ -1285,10 +1337,11 @@ export function systemMapScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  // the host — closing the film at the right
+  // the host — closing the film at the right (ground H*0.63: the feet
+  // band's worst-case camera bottom clears the 2-row pill)
   const scale = 1.5;
   const hx = W * 0.815;
-  const hy = H * 0.66;
+  const hy = H * 0.63;
   const arrive = Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, wordTimes: g.gWordTimes, words: g.wordTexts });
   registerFigure(g.beat.scene.sceneKey ?? 'finance', 'host', 'subject', scale, H, true);
   drawStickmanV2(ctx, hx, hy, scale, t, {

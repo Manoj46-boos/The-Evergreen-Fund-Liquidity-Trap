@@ -611,11 +611,19 @@ function cameraV2(
   // the frame bound by the exit grammar + max push scale compounding.
   // The exit stack now yields when it would crop: exit lifts/trucks are
   // clamped so the effective scale NEVER exceeds 1.06 during the exit
-  // window (the certified envelope for the shipped layouts), and the
-  // whole-camera hard cap holds at 1.12 (the hero-move ceiling). This
+  // window (the certified envelope for the shipped layouts). This
   // is the structural fix — layouts no longer depend on per-scene
   // hand-tuning to stay inside the frame.
-  if (camScale > 1.12) camScale = 1.12;
+  // VAULT NOIR fix (harness dense sweep @1163.3s): the 0.22 scenePush
+  // under the 1.12 cap drove the full-figure host room to scale 1.12 —
+  // the 2.65 rig's crown (design top ≈ 39) transformed to −47px: the
+  // presenter shipped decapitated for the punch's length. The cap
+  // returns to the certified 1.06 envelope (the exit-recede value this
+  // file already trusts): the push still travels 13% from the 0.93 base,
+  // and every registered bottom ≤ 766 clears the worst-case pill band
+  // at (y−540)·1.06+540+34. Data-scene slams keep their punch through
+  // the cut transient (scalePunch), which the guard already exempts.
+  if (camScale > 1.06) camScale = 1.06;
   if (groupDur > 1400) {
     const exitP0 = clamp01((gt - (groupDur - 420)) / 420);
     if (exitP0 > 0 && camScale > 1.06) {

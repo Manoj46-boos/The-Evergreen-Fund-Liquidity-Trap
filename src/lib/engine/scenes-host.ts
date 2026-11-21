@@ -99,7 +99,16 @@ export function walkPush(phase: number): number {
 // stage ground rises 0.66 -> 0.64 — the band's worst-case bottom clears
 // the pill top by ~11px; the stage furniture (ramps, desk rules,
 // contacts) is computed FROM this constant, so it moves with him.
-const HOST_GROUND = (H: number): number => H * 0.64;
+// VAULT NOIR fix (harness dense sweep @1156-1162s): the crown band
+// (ground − 241·rig) at ground 0.64 transformed to −28px under the
+// certified 1.06 camera + max upward drift — the dense sweep flagged the
+// presenter's head crossing the top frame edge on the c6-allin editorial
+// beat. The ground rises to 0.675: with the foreground parallax
+// differential (±0.4-0.45× camY) the crown's worst-case top lands ~13px
+// INSIDE the frame, and the feet band (ground + 25·rig ≈ 795-810)
+// still clears the 1-row host caption pill (top 864) under the same
+// worst-case camera.
+const HOST_GROUND = (H: number): number => H * 0.675;
 // PREMIUM UPGRADE FIX 1 (100-judge critique §5.1): host scale 2.05 → 2.6.
 // At 2.05 the figure occupied 1.58% of frame area; at 2.6 it occupies ~2.8%,
 // and every downstream amplitude (head, eyes, scarf, gesture travel, smear,
@@ -841,7 +850,7 @@ export function hostSceneV2(g: SceneCtx): void {
     // at the 0.585 ground the 2.4× host's head topped out at 56px headroom
     // (5%); the shared 0.62 ground restores the ~9% the probe gate wants.
     ctx, hx, HOST_GROUND(H), HOST_SCALE, t,
-    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: 0.8, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.55, // P2-4: hero moment — clear space, deep differential
+    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: 0.8, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.45, // VAULT NOIR: 0.55 → 0.45 — the crown band needs the drift headroom (sweep @1156-1163s)
       // PANEL ACCEPTANCE (audit FIX 2): full-body envelope — see drawHost.
       hostBody: true,
       stretch: Math.min(1,
@@ -1183,7 +1192,7 @@ export function splitNumbersScene(g: SceneCtx): void {
     // 32%) — the host is its presenter at the certified 1.5 side band
     // (the 1.9 subject raise broke the frame-edge envelope the guard
     // certified at 1.5).
-    drawStickmanV2(ctx, W * 0.87, H * 0.645, 1.5, t, {
+    drawStickmanV2(ctx, W * 0.87, H * 0.63, 1.5, t, {
       pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT, wordTimes: g.gWordTimes }),
       alpha: clamp01((t - 500) / 500),
       look: -0.8,
@@ -1241,7 +1250,7 @@ export function splitNumbersScene(g: SceneCtx): void {
       'splitNum:THE MARKET:0', 'splitNum:THE MARKET:1', 'splitNum:THE MARKET:2',
       'splitNum:THE MOOD:0', 'splitNum:THE MOOD:1', 'splitNum:THE MOOD:2',
     );
-    drawStickmanV2(ctx, hxSingle, H * 0.67, 1.55, t, {
+    drawStickmanV2(ctx, hxSingle, H * 0.64, 1.55, t, {
       // P6 (SCALE THE CAST): the flagged cheering-speck staging 1.35 → 1.55
       // (+32% frame area); the guard sweep re-certifies the envelope.
       // PHASE 3 COMPOSITION: single-panel mode — the panel system is the

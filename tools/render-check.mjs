@@ -765,9 +765,20 @@ if (guard && !process.argv.includes('--no-sweep')) {
     p0.checked++;
     fn(guard.collectViolations());
   };
+  // VAULT NOIR re-key: the rule frames were picked from the K-Shaped
+  // film's timeline; this studio renders THE EVERGREEN FUND. Each frame
+  // below is computed from THIS film's own manifest-built timeline:
+  //   R1 111600  — c2-scale host mid-hold (top furniture both registered)
+  //   R2 111600  — same host frame (figure vs display text)
+  //   R3 1602100 — systemMap mid-hold (edge envelope)
+  //   R4 1664090 — end screen mid-hold (caption strip)
+  //   R5 49000   — c1-question bigText slam (display-text right air)
+  //   R6 287700  — wrapperMatrix focus (the matrix is this film's
+  //                signature data instrument — its card + column headers
+  //                must register)
   // R1 — watermark corner: the two fixed top-furniture envelopes must not
   // intersect each other (the rail's rule line under the lockup glyphs).
-  p0frame(553800, 'R1', () => {
+  p0frame(111600, 'R1', () => {
     const cgState = guard.collisionGuard;
     const fixed = (cgState ? cgState.fixed : []).filter((r) => r.id === 'roomrail' || r.id === 'watermark');
     if (fixed.length < 2) return p0fail('R1', 'top furniture not both registered');
@@ -777,36 +788,37 @@ if (guard && !process.argv.includes('--no-sweep')) {
     if (ox > 0 && oy > 0) p0fail('R1', `roomrail envelope intersects watermark (${Math.round(ox)}x${Math.round(oy)})`);
   });
   // R2 — the headline owns its column: no figure band may overlap the
-  // paradox headline's registered text (the strike-through-over-the-head).
-  p0frame(845500, 'R2', (vs) => {
-    const hit = vs.find((v) => v.id.startsWith('hostBody') && /paradox|PARADOX/i.test(v.id) === false && String(v.pill?.id ?? '').includes('PARADOX'));
+  // scene headline's registered text (the strike-through-over-the-head).
+  p0frame(111600, 'R2', (vs) => {
     const anyHostText = vs.filter((v) => (v.id.startsWith('hostBody') || v.id.startsWith('stickman@')) && v.kind === 'text');
     if (anyHostText.length) p0fail('R2', `figure vs display text: ${anyHostText.map((v) => v.id).join(', ')}`);
   });
-  // R3 — the odds spread ends inside the safe margin: the track's last
-  // marker rect (registered content) must hold EDGE_PAD of right air.
-  p0frame(953100, 'R3', (vs) => {
+  // R3 — the system map ends inside the safe margin: registered content
+  // must hold EDGE_PAD of air at every frame edge.
+  p0frame(1602100, 'R3', (vs) => {
     const edge = vs.filter((v) => v.kind === 'edge' && !v.id.startsWith('stickman@'));
-    if (edge.length) p0fail('R3', `odds-spread content at the frame edge: ${edge.map((v) => v.id).join(', ')}`);
+    if (edge.length) p0fail('R3', `system-map content at the frame edge: ${edge.map((v) => v.id).join(', ')}`);
   });
   // R4 — the end screen reserves the caption strip: no CTA/content rect
   // may overlap the caption band on the end screen's mid-hold.
-  p0frame(1154800, 'R4', (vs) => {
+  p0frame(1664090, 'R4', (vs) => {
     const hit = vs.filter((v) => v.kind !== 'edge' && !v.id.startsWith('stickman@'));
     if (hit.length) p0fail('R4', `content vs caption strip: ${hit.map((v) => v.id).join(', ')}`);
   });
   // R5 — display text keeps its right air: no registered TEXT rect may
-  // cross the right EDGE_PAD on the paradox hold (the sub-headline clip).
-  p0frame(860500, 'R5', (vs) => {
+  // cross the right EDGE_PAD on the statement slam (the sub-headline clip).
+  p0frame(49000, 'R5', (vs) => {
     const hit = vs.filter((v) => v.kind === 'edge' && /Txt|text|title|line/i.test(v.id));
     if (hit.length) p0fail('R5', `display text at the frame edge: ${hit.map((v) => v.id).join(', ')}`);
   });
-  // R6 — the fund slab is a drawn instrument: the frame must register the
-  // slab's baseline/border structure (the slab block's rects exist).
-  p0frame(906800, 'R6', () => {
-    const rects = guard.guardRects().map((r) => r.id);
-    const slab = rects.filter((id) => id.startsWith('fundSlab'));
-    if (slab.length < 2) p0fail('R6', `fund slab instrument incomplete: [${slab.join(', ')}] (baseline + label must register; the border is drawn structure around already-registered content)`);
+  // R6 — the wrapper matrix is a drawn instrument: the frame must register
+  // the focused card's plate AND its column-header texts (the ledger rows
+  // are registered text inside an already-registered card).
+  p0frame(287700, 'R6', () => {
+    const rects = guard.guardRects();
+    const cards = rects.filter((r) => r.id.startsWith('card@'));
+    const heads = rects.filter((r) => r.id.startsWith('colHead:'));
+    if (cards.length < 1 || heads.length < 2) p0fail('R6', `wrapper matrix instrument incomplete: ${cards.length} card(s), ${heads.length} header(s)`);
   });
   console.log(`P0 guard rules: ${p0.checked} frames, ${p0.violations} violation(s) — ${p0.violations ? 'VIOLATIONS FOUND' : 'all six rules pass'}`);
 }

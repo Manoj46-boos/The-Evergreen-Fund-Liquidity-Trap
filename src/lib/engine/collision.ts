@@ -285,7 +285,7 @@ export function collectViolations(): CollisionViolation[] {
       // transition window figure-class rects exempt vs the caption and the
       // top furniture. Every plate/chip/text still flags at every frame,
       // and figures still flag against everything at rest.
-      const transitioning = Math.abs(cam.dy) > 30 || cam.scale > 1.08;
+      const transitioning = cam ? Math.abs(cam.dy) > 30 || cam.scale > 1.08 : false;
       const isFigure = r0.cls === 'host' || r0.id.startsWith('stickman@');
       if (transitioning && isFigure && (ob.kind === 'pill' || ob.kind === undefined)) continue;
       // The crown band (hostBodyApex) can only geometrically overlap the
@@ -353,7 +353,7 @@ export function collectViolations(): CollisionViolation[] {
       // frames — the host-band top rule exists for RESTING framing, not
       // the certified transition grammar. The top check pauses inside the
       // dive window; the x rules stay live at every frame.
-      const diving = Math.abs(cam.dy) > 120 || cam.scale > 1.08;
+      const diving = Math.abs(cam.dy) > 120 || cam.scale > 1.08; // cam guarded by the enclosing if
       const overT = r0.cls === 'host' && !diving ? EDGE_PAD - r.y : 0;
       const depth = Math.max(overL, overR, overT);
       if (depth >= MIN_DEPTH) {
