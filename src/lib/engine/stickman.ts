@@ -670,7 +670,7 @@ export class Stickman {
         // state 1 — weight onto the other leg: pelvis/shoulder counter-flip
         const shifted: Pose = {
           ...settle,
-          pelvisTilt: -settle.pelvisTilt * 1.15,
+          pelvisTilt: -(settle.pelvisTilt ?? 0) * 1.15,
           shoulderTilt: -(settle.shoulderTilt ?? 0) * 1.15,
           rootY: settle.rootY + 3,
           lLU: settle.rLU * 0.9, lLL: settle.rLL * 0.9,
