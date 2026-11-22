@@ -52,7 +52,7 @@ export interface CollisionViolation {
    *  v10.1 (panel 11 re-review): 'host' — a side-host body envelope plating
    *  scene content (statCards host over the 12.4% card, aiDatacenter host
    *  in the scrolling rack field). */
-  kind: 'pill' | 'fixed' | 'edge' | 'text' | 'host' | 'cardPad' | 'hand';
+  kind: 'pill' | 'fixed' | 'edge' | 'text' | 'host' | 'cardPad' | 'hand' | 'figureType';
 }
 
 /** PHASE-0 (panel report §7-D6): the ONE bottom-padding floor for text that
@@ -101,6 +101,14 @@ interface State {
    *  longer rely on a static ±20px envelope. Null = envelope mode (Shorts,
    *  probes). */
   camera: { dx: number; dy: number; scale: number } | null;
+  /** U-16 (100-JUDGE VISUAL AUDIT — FIGURE-VS-DISPLAY-TYPE): the figure's
+   *  head/torso envelope, registered by drawStickmanV2 for EVERY figure
+   *  (not just hostBody side hosts). The B-02 defect class — "the gold quote
+   *  rule and the headline terminate inside the figure's head zone" — was
+   *  invisible to the host pass because quoteCard-style figures draw WITHOUT
+   *  hostBody (they register only the feet band). The display-type pass
+   *  below checks these envelopes against the READING-text registry. */
+  figures: Array<GuardRect & { id: string }>;
 }
 
 /** Global guard state. The harness flips `enabled` before rendering. */
@@ -115,6 +123,7 @@ export const collisionGuard: State = {
   violations: [],
   camera: null,
   contactIds: new Set<string>(),
+  figures: [],
 };
 
 /** Reset per-frame state. Call at the top of drawFrame when enabled. */
@@ -129,6 +138,7 @@ export function resetGuard(frame: string): void {
   collisionGuard.violations = [];
   collisionGuard.camera = null;
   collisionGuard.contactIds = new Set<string>();
+  collisionGuard.figures = [];
 }
 
 /**
@@ -193,6 +203,19 @@ export function registerText(id: string, x: number, y: number, w: number, h: num
   const entry = { id, x, y, w, h, screen };
   if (!screen) g.content.push({ id, x, y, w, h });
   g.texts.push(entry);
+}
+
+/** U-16 (100-JUDGE VISUAL AUDIT — FIGURE-VS-DISPLAY-TYPE): register the
+ *  figure's HEAD/TORSO envelope. drawStickmanV2 calls this for every figure
+ *  it draws (the crown-to-hip zone — where a headline, quote rule or
+ *  display numeral must never terminate). Declared contact targets are
+ *  still exempt (a palm ON the % glyph overlaps the torso by design); the
+ *  display-type pass in collectViolations arbitrates. */
+export function registerFigure(id: string, x: number, y: number, w: number, h: number): void {
+  const g = collisionGuard;
+  if (!g.enabled || w <= 0 || h <= 0) return;
+  if (x > 1920 || y > 1080 || x + w < 0 || y + h < 0) return;
+  g.figures.push({ id, x, y, w, h });
 }
 
 /** Register the caption pill's rect (called by drawCaptions itself). */
@@ -519,6 +542,44 @@ export function collectViolations(): CollisionViolation[] {
           pill: { x: ts2.x, y: ts2.y, w: ts2.w, h: ts2.h },
           depth: Math.round(Math.min(oxH, oyH)),
           kind: 'hand',
+        });
+      }
+    }
+  }
+
+  // ── U-16 (100-JUDGE VISUAL AUDIT) — FIGURE-VS-DISPLAY-TYPE (the B-02
+  // recurrence guard). The quote card's gold rule and headline terminated
+  // INSIDE the figure's head zone and every sweep stayed green: the figure
+  // drew without hostBody (only the feet band registered) and the quote text
+  // registered as a content rect, not against any figure class. The law now:
+  // every figure's head/torso envelope (registerFigure) is checked against
+  // every READING-text rect (registerText). Display type the figure is
+  // PRESENTING (declared via declareHostContact) stays exempt; a scene that
+  // genuinely stages text through the body declares it like any contact.
+  // Camera-exact (both classes ride the scene camera); ≥10px depth /
+  // ≥400px² — the same meaningfulness thresholds as the text pass.
+  for (const fig of g.figures) {
+    for (const t of texts) {
+      if (g.contactIds.has(t.id)) continue;
+      const fs = cam
+        ? {
+            x: (fig.x - 960) * cam.scale + 960 + cam.dx,
+            y: (fig.y - 540) * cam.scale + 540 + cam.dy,
+            w: fig.w * cam.scale,
+            h: fig.h * cam.scale,
+          }
+        : fig;
+      const ts3 = toScreen(t);
+      const oxF = Math.min(fs.x + fs.w, ts3.x + ts3.w) - Math.max(fs.x, ts3.x);
+      const oyF = Math.min(fs.y + fs.h, ts3.y + ts3.h) - Math.max(fs.y, ts3.y);
+      if (oxF > 0 && oyF > 0 && Math.min(oxF, oyF) >= MIN_DEPTH && oxF * oyF >= 400) {
+        out.push({
+          frame: g.frame,
+          id: `${fig.id}⇄${t.id}`,
+          rect: { x: fs.x, y: fs.y, w: fs.w, h: fs.h },
+          pill: { x: ts3.x, y: ts3.y, w: ts3.w, h: ts3.h },
+          depth: Math.round(Math.min(oxF, oyF)),
+          kind: 'figureType',
         });
       }
     }

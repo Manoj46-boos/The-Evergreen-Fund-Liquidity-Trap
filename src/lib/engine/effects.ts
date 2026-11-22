@@ -3,7 +3,7 @@
  * film grain tile, soft vignette (bright edges), sparkle bursts, K motif glow.
  */
 
-import { clamp01, drift, easeOutCubic, hash01, hashRange, springTo } from './easing';
+import { clamp, clamp01, drift, easeOutCubic, hash01, hashRange, springTo } from './easing';
 import { PALETTE, rgba, glowBlob, hexLerp } from './theme';
 import { AMP, K3D } from './perception';
 
@@ -1111,7 +1111,14 @@ export function drawPct3D(
   grow: number,
   t: number,
   face = true,
-  turn = 0
+  turn = 0,
+  /** U-18 (100-JUDGE VISUAL AUDIT — THE SIGNATURE OBJECT ACTS): 1 = the
+   *  glyph CRACKS along its own slash — the two halves separate 20px with
+   *  the spring settle (see crackEnvelope). 0 = the whole glyph. */
+  crack = 0,
+  /** ms since the crack fired (drives the spring settle + the fracture
+   *  flash). Negative = no crack clock. */
+  crackAge = -1
 ): void {
   void face;
   ctx.save();
@@ -1164,7 +1171,22 @@ export function drawPct3D(
   const lx = x - s * 0.52, ly = y - s * 0.55;
   const rx = x + s * 0.52, ry = y + s * 0.55;
   const turnE = easeOutCubic(clamp01(turn));
+  // ── U-18 — THE CRACK ALONG THE SLASH ──
+  // The % breaks along its own slash: the two halves separate 20px (the
+  // audit's number) with a damped spring settle, and the fresh fracture
+  // seam flashes once. The clip line is the slash's own axis, so the
+  // fracture reads as the glyph failing at its thinnest read.
+  const crackP = crack > 0 && crackAge >= 0 ? crackEnvelope(crackAge) : 0;
+  const slashX0 = x + s * 0.36, slashY0 = y - s * 0.95;
+  const dLen = Math.hypot(0.66, 1.9);
+  const dNx = -0.66 / dLen, dNy = 1.9 / dLen;      // along the slash (top-right → bottom-left)
+  const pNx = dNy, pNy = -dNx;                     // perpendicular (toward the lower-right half)
+  const sep = 20 * 0.5 * crackP;                   // each half travels half the 20px gap
+  const CL = s * 5;                                // clip polygon reach
   // ── FLAT PAINTED MODE (rest) ──
+  // U-18: the paint is a closure so the crack can draw it twice — once per
+  // clipped half, each half offset along the fracture's perpendicular.
+  const paintGlyph = (): void => {
   if (turnE < 1) {
     ctx.save();
     ctx.globalAlpha *= 1 - turnE;
@@ -1258,7 +1280,70 @@ export function drawPct3D(
     }
     ctx.restore();
   }
+  };
+  // ── U-18 dispatch: whole glyph, or the two cracked halves ──
+  if (crackP > 0) {
+    // HALF A — the upper-left side of the slash (rides −perp)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(slashX0, slashY0);
+    ctx.lineTo(slashX0 + dNx * CL, slashY0 + dNy * CL);
+    ctx.lineTo(slashX0 + dNx * CL - pNx * CL, slashY0 + dNy * CL - pNy * CL);
+    ctx.lineTo(slashX0 - pNx * CL, slashY0 - pNy * CL);
+    ctx.closePath();
+    ctx.clip();
+    ctx.translate(-pNx * sep, -pNy * sep);
+    paintGlyph();
+    ctx.restore();
+    // HALF B — the lower-right side of the slash (rides +perp)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(slashX0, slashY0);
+    ctx.lineTo(slashX0 + dNx * CL, slashY0 + dNy * CL);
+    ctx.lineTo(slashX0 + dNx * CL + pNx * CL, slashY0 + dNy * CL + pNy * CL);
+    ctx.lineTo(slashX0 + pNx * CL, slashY0 + pNy * CL);
+    ctx.closePath();
+    ctx.clip();
+    ctx.translate(pNx * sep, pNy * sep);
+    paintGlyph();
+    ctx.restore();
+    // THE FRACTURE SEAM — the fresh break flashes once and fades; the
+    // seam itself stays as the hairline the halves parted along.
+    const flash = Math.exp(-Math.max(0, crackAge) / 260);
+    ctx.save();
+    ctx.strokeStyle = rgba('#FFF4D0', 0.28 + 0.62 * flash);
+    ctx.lineWidth = 2 + 3 * flash;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(slashX0, slashY0);
+    ctx.lineTo(slashX0 + dNx * s * 1.9, slashY0 + dNy * s * 1.9);
+    ctx.stroke();
+    if (flash > 0.04) {
+      ctx.strokeStyle = rgba('#FFFFFF', 0.85 * flash);
+      ctx.lineWidth = 1.5 + 2 * flash;
+      ctx.beginPath();
+      ctx.moveTo(slashX0, slashY0);
+      ctx.lineTo(slashX0 + dNx * s * 1.9, slashY0 + dNy * s * 1.9);
+      ctx.stroke();
+    }
+    ctx.restore();
+  } else {
+    paintGlyph();
+  }
   ctx.restore();
+}
+
+/**
+ * U-18 — THE SPRING SETTLE for the % crack: a damped spring from 0 that
+ * overshoots (~1.2×) once and settles at 1 — the halves part 20px with
+ * weight, not a linear slide. Pure function of the ms since the crack
+ * fired (scrub-safe, deterministic).
+ */
+export function crackEnvelope(ageMs: number): number {
+  if (ageMs < 0) return 0;
+  const u = ageMs / 1000;
+  const spring = 1 - Math.exp(-4.2 * u) * Math.cos(9.2 * u);
+  return clamp(spring, 0, 1.35);
 }
 
 // ── VAULT NOIR v3 — THE LIQUID-IRIS TRANSITION ──────────────────────────────

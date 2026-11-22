@@ -4,7 +4,7 @@
  */
 
 import { clamp01, easeInOutSine, easeOutCubic, easeOutQuad, hash01, hashStr, lerp, seamArrival, landPulse } from './easing';
-import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, glowBlob, paintBg, scenePlate, chapterFamily, chapterArch, FONT_DISPLAY, CAPTION_ZONE_TOP, TYPE_FLOOR } from './theme';
+import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, glowBlob, paintBg, scenePlate, chapterFamily, chapterArch, FONT_DISPLAY, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, STROKE, kickerChip } from './theme';
 import { bokehField, drawK3D, drawK, softBloom, kMotifs, lightRays, slideUp, subjectHalo, microShake, impactRing, depthShift } from './effects';
 import { Stickman, POSES, blendPose, walkIn, nodPulse, accentPulse, launchPulse, walkSmear, take, heroTake } from './stickman';
 import { camState } from './effects';
@@ -571,17 +571,13 @@ function hostChips(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
   if (chipTxt) {
     const ap = clamp01((t - 900) / 600);
     if (ap > 0) {
-      setFont(ctx, 34, 600); // v9 (D-07): floor
-      const tw = ctx.measureText(chipTxt).width;
-      ctx.save();
-      ctx.globalAlpha = ap * 0.85;
-      ctx.fillStyle = rgba('#FFFFFF', 0.9);
-      roundRect(ctx, W / 2 - tw / 2 - 24, H * 0.12, tw + 48, 44, 22);
-      ctx.fill();
-      ctx.fillStyle = PALETTE.inkFaint;
-      ctx.textAlign = 'left';
-      ctx.fillText(chipTxt, W / 2 - tw / 2, H * 0.12 + 29);
-      ctx.restore();
+      // U-16 (RETIRE THE WHITE PILL KICKER): the white pill with faint ink
+      // text measured ~2:1 at the feed — the B-09 contrast class. Every
+      // kicker chip draws through the ONE navy-glass plate with gold text
+      // (theme.kickerChip), centred here by measured width.
+      setFont(ctx, LABEL_FLOOR, 700);
+      const kw = ctx.measureText(chipTxt).width + 60;
+      kickerChip(ctx, chipTxt, W / 2 - kw / 2, H * 0.12, { alpha: ap });
     }
   }
 }
@@ -1290,7 +1286,9 @@ export function splitNumbersScene(g: SceneCtx): void {
     const vsW = W * 0.36;
     const delay = 300;
     drawNumberPanel(g, W * 0.06, py - 22, vsW, panelH, String(s.leftKicker ?? 'THE MARKET'), leftStats, t, 0);
-    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay);
+    // U-16: the host stands at W*0.87 — the MOOD labels wrap 160px short of
+    // the panel's right edge so no label terminates inside his head zone
+    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay, vsW - 160);
     // PHASE 3 COMPOSITION (Fix 1 — DATA-BEAT HERO FLOOR): the vs beat's
     // hero object is the two-panel data system — x 0.06W→0.905W × panelH:
     // 1622×~370 = 28.7% of the frame, over the 18% floor (the harness
@@ -1324,7 +1322,10 @@ export function splitNumbersScene(g: SceneCtx): void {
       g, mode === 'left' ? lx : rx, mode === 'left' ? py - 22 : py + 22, panelW, panelH,
       String(s.leftKicker ?? (mode === 'left' ? 'THE MARKET' : 'THE MOOD')),
       mode === 'left' ? leftStats : moodStats,
-      t, 0
+      t, 0,
+      // U-16: mode 'left' plants the host at the panel's RIGHT edge — the
+      // labels wrap before his head zone (the B-02 recurrence guard)
+      mode === 'left' ? panelW - 160 : undefined
     );
     // 100-JUDGE REPORT (fix D05 — THE 85% FRAME): the single-panel mode
     // shipped one card, one host and nothing else — the audit measured the
@@ -1479,7 +1480,9 @@ export function splitNumbersScene(g: SceneCtx): void {
       ctx.globalAlpha = ap * pp;
       chipLine('TWO COMPLETELY DIFFERENT STORIES.', slotY, 36, PALETTE.goldDeep, PALETTE.goldWash);
     } else {
-      chipLine('SAME COUNTRY. SAME YEAR.', slotY, 34, PALETTE.ink, rgba('#FFFFFF', 0.96));
+      // U-16 (RETIRE THE WHITE PILL KICKER): the statement chip joins the
+      // navy-glass law — gold text on the vault glass, AA at the feed.
+      chipLine('SAME COUNTRY. SAME YEAR.', slotY, 34, PALETTE.goldInk, 'rgba(7,14,30,0.82)');
     }
     ctx.restore();
   }
@@ -1490,18 +1493,17 @@ export function splitNumbersScene(g: SceneCtx): void {
       const tw = ctx.measureText(cornerNote).width;
       ctx.save();
       ctx.globalAlpha = ap * 0.9;
-      ctx.fillStyle = rgba('#FFFFFF', 0.92);
-      // v5: was H-210 (y 870–914) — inside the caption pill band, grazing
-      // wide pills (the v4 panel already called it “extremely close”).
-      // Now it sits in the deliberate gap BELOW the pill (bottom ≈ 956) and
-      // above the progress bar, right-aligned opposite the source tag.
+      // U-16 (RETIRE THE WHITE PILL KICKER): the corner note joins the
+      // navy-glass law — the vault glass with gold text, right-aligned
+      // opposite the source tag in the deliberate below-pill gap.
+      ctx.fillStyle = 'rgba(7,14,30,0.82)';
       roundRect(ctx, W - tw - 160, H - 112, tw + 44, 44, 22);
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = rgba(PALETTE.grid, 0.6);
+      ctx.lineWidth = STROKE.hairline;
+      ctx.strokeStyle = rgba(PALETTE.gold, 0.65);
       roundRect(ctx, W - tw - 160, H - 112, tw + 44, 44, 22);
       ctx.stroke();
-      ctx.fillStyle = PALETTE.inkFaint;
+      ctx.fillStyle = PALETTE.goldInk;
       ctx.textAlign = 'left';
       ctx.fillText(cornerNote, W - tw - 138, H - 83);
       ctx.restore();
@@ -1518,7 +1520,15 @@ function drawNumberPanel(
   kicker: string,
   stats: StatItem[],
   t: number,
-  delay: number
+  delay: number,
+  /** U-16 (the B-02 recurrence guard): the label column's wrap width.
+   *  When a host stands beside THIS panel (the vs-mode right panel, the
+   *  single-panel 'left' mode), the labels must wrap BEFORE the figure's
+   *  head zone — the audit's defect class ("the headline terminates inside
+   *  the figure's head zone") shipped exactly here: 'want more private-
+   *  market exposure' ran under the presenting host's dome. Default keeps
+   *  the certified w-88 for host-free panels. */
+  wrapW?: number
 ): void {
   const { ctx } = g;
   const ap = clamp01((t - delay) / 650);
@@ -1555,7 +1565,7 @@ function drawNumberPanel(
   const LBL_OFF = 94;  // label baseline below the row origin
   const DESC = 8;      // 34px Inter descender allowance
   setFont(ctx, 34, 600); // measure at the RENDER size (was 25 — see note)
-  const statLines = stats.map((st) => wrapText(ctx, st.label, w - 88, 34, 600).slice(0, 2));
+  const statLines = stats.map((st) => wrapText(ctx, st.label, wrapW ?? w - 88, 34, 600).slice(0, 2));
   const maxLines = Math.max(1, ...statLines.map((ls) => ls.length));
   const rowH = LBL_OFF + (maxLines - 1) * 32 + DESC;
   const nStats = stats.length;
@@ -1590,7 +1600,10 @@ function drawNumberPanel(
     let lblSize = 34;
     setFont(ctx, lblSize, 600);
     if (lines.length > 1 && stackedBottom > h - CARD_TEXT_PAD_BOTTOM) {
-      while (ctx.measureText(st.label).width > w - 88 && lblSize > 24) {
+      // U-16: the shrink measures against the SAME wrap width the stack
+      // used (wrapW) — a host-adjacent panel's single-line label must
+      // shrink, not stretch back under the figure's head zone
+      while (ctx.measureText(st.label).width > (wrapW ?? w - 88) && lblSize > 24) {
         lblSize -= 1;
         setFont(ctx, lblSize, 600);
       }
@@ -1601,13 +1614,17 @@ function drawNumberPanel(
     // PHASE-0 §7-D6: register the row so the cardPad assert checks this
     // plate's text-vs-card-edge every frame (the guard class that was
     // missing when the descender clip shipped).
+    // U-16: the rect carries the MEASURED ink (the widest actual line),
+    // not the column — the figure-vs-display-type pass arbitrates against
+    // real ink, so a host-adjacent panel is judged by what it prints.
     const rowTop = sy + NUM_OFF - 62;
     const lastBaseline = sy + LBL_OFF + (lines.length - 1) * 32;
+    const inkW = Math.max(...lines.map((ln) => ctx.measureText(ln).width), st.big.length * 40, 120);
     registerText(
       `splitNum:${kicker}:${i}`,
       x + 44,
       rowTop,
-      Math.max(w - 88, 120),
+      inkW,
       lastBaseline + DESC - rowTop
     );
   });

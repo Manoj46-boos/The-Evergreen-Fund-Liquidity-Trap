@@ -6,7 +6,7 @@
  */
 
 import { clamp, clamp01, easeInOutCubic, easeOutBack, easeOutCubic, hash01, hashStr, lerp, seamArrival, springTo } from './easing';
-import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill } from './theme';
+import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill, STROKE, kickerChip } from './theme';
 import { bokehField, kMotifs, lightRays, drawK, drawK3D, sparkles, hazeBands, impactRing, microShake, depthShift } from './effects';
 import { SceneCtx } from './scene-context';
 import { REACTIONS, reactionAt, reactionStart } from './scene-context';
@@ -48,7 +48,7 @@ function bg(g: SceneCtx, seed: number, gold = 0.4, plate?: 'up' | 'down' | 'gold
     const vpX = W / 2;
     ctx.save();
     ctx.strokeStyle = rgba(PALETTE.grid, 0.5);
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = STROKE.hairline; // U-16 ink law: horizon hairline
     // the horizon hairline (broken at centre so it never reads as a rule)
     ctx.beginPath();
     ctx.moveTo(W * 0.04, horizon);
@@ -1380,8 +1380,23 @@ export function barsCompareScene(g: SceneCtx): void {
 export function trioConvergeScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 121);
-  sceneTitle(ctx, 'Three surveys. One shape.', 180, 220, clamp01(t / 600));
-  const names = ['Gallup', 'Univ. of Michigan', 'Conference Board'];
+  // ── U-19 (100-JUDGE VISUAL AUDIT — THE DEAD PROPS): this drawer IGNORED
+  // its own `items`, `title` and `cornerNote` keys — the ownership registry
+  // never listed them, the drawer never read them, and the two shipped beats
+  // that pass them (the c1 THESIS and the c5 LESSON) rendered as the survey
+  // trio: "Three surveys. One shape." over Gallup/UMich/Conference Board
+  // cards, while the VO said "liquidity is a feature of three things".
+  // Silent ignores are how staged content rots. All three keys are now
+  // implemented: the items drive the cards (big label + sub label + tone),
+  // the title names the frame, the cornerNote anchors the thesis. The
+  // legacy survey rendering stays for beats that pass neither.
+  const items = s.items as Array<{ big: string; label: string; tone: string }> | undefined;
+  const useItems = Array.isArray(items) && items.length === 3;
+  sceneTitle(ctx, String(s.title ?? 'Three surveys. One shape.'), 180, 220, clamp01(t / 600));
+  const names = useItems
+    ? items!.map((it) => String(it.big))
+    : ['Gallup', 'Univ. of Michigan', 'Conference Board'];
+  const itemTones = useItems ? items!.map((it) => it.tone) : null;
   const arcs = [
     { tone: 'down', pts: [[0, 60], [3, 55], [6, 40], [9, 22], [10, 14], [12, 26], [14, 34], [15, 32]] },
     { tone: 'down', pts: [[0, 60], [3, 54], [6, 42], [9, 26], [10, 18], [12, 30], [14, 38], [15, 36]] },
@@ -1391,8 +1406,11 @@ export function trioConvergeScene(g: SceneCtx): void {
   // single value — the panel read the minis as decorative squiggles. Each
   // card now carries its survey's REAL first→latest reading (the same
   // numbers the full charts showed earlier in the chapter): Gallup −45→−33,
-  // UMich 52.2→60.1, Conference Board 88.2→92.3.
-  const realValues = ['−45 → −33', '52.2 → 60.1', '88.2 → 92.3'];
+  // UMich 52.2→60.1, Conference Board 88.2→92.3. (Legacy survey beats only —
+  // the U-19 item beats carry their own sub labels instead.)
+  const realValues = useItems
+    ? items!.map((it) => String(it.label))
+    : ['−45 → −33', '52.2 → 60.1', '88.2 → 92.3'];
   arcs.forEach((a, i) => {
     const ap = clamp01((t - 300 - i * 320) / 700);
     if (ap <= 0) return;
@@ -1400,32 +1418,89 @@ export function trioConvergeScene(g: SceneCtx): void {
     const y = H * 0.26;
     const w = W * 0.22;
     const h = H * 0.3;
+    const tone = itemTones ? TONE(itemTones[i]) : null;
     ctx.save();
     ctx.globalAlpha = ap;
     card(ctx, x, y, w, h + 40, { r: 26 });
-    setFont(ctx, 34, 700);
-    ctx.fillStyle = PALETTE.ink;
+    setFont(ctx, 40, 700, FONT_DISPLAY);
+    ctx.fillStyle = tone ? tone.main : PALETTE.ink;
     ctx.textAlign = 'center';
-    ctx.fillText(names[i], x + w / 2, y + 52);
-    // the real first→latest reading, bottom of card
+    registerText(`trio:big:${names[i]}`, x + 14, y + 20, w - 28, 48);
+    ctx.fillText(names[i], x + w / 2, y + 56, w - 28);
+    // the item's sub label — what the card's leg MEANS (U-19: the beats'
+    // own words, not the survey's index caption)
     const vp = clamp01((t - 1800 - i * 320) / 600);
     ctx.globalAlpha = ap * vp;
-    setFont(ctx, 34, 700);
-    ctx.fillStyle = PALETTE.ink;
-    ctx.fillText(realValues[i], x + w / 2, y + h + 6);
+    setFont(ctx, Math.max(LABEL_FLOOR, 34), 600);
+    ctx.fillStyle = PALETTE.inkSoft;
+    const subLines = wrapText(ctx, realValues[i], w - 64, 34, 600);
+    subLines.slice(0, 3).forEach((ln, li) => {
+      ctx.fillText(ln, x + w / 2, y + 110 + li * 44, w - 64);
+    });
+    // U-16: the reading-text rect measures the ACTUAL lines (not the full
+    // column) — the host's palm rests on this card's right edge by design
+    // (the contact verb), and the hand-vs-text pass arbitrates against the
+    // real ink, not empty column width.
+    const subW = Math.max(...subLines.slice(0, 3).map((ln) => ctx.measureText(ln).width), 1);
+    registerText(`trio:sub:${names[i]}`, x + w / 2 - subW / 2, y + 78, subW, 40 + Math.min(2, subLines.length - 1) * 44);
+    if (!useItems) {
+      // legacy survey beat: the real first→latest reading at the card foot
+      ctx.globalAlpha = ap * vp;
+      setFont(ctx, 34, 700);
+      ctx.fillStyle = PALETTE.ink;
+      ctx.fillText(realValues[i], x + w / 2, y + h + 6);
+      ctx.globalAlpha = ap;
+      setFont(ctx, 22 + 6, 600); // v9 (D-07): floor — "index, low→latest" caption
+      ctx.fillStyle = PALETTE.inkFaint;
+      ctx.fillText('index · low → latest', x + w / 2, y + h + 34);
+    } else {
+      // the tone's foot rail — the card carries its thesis tone (ink law
+      // accent weight), so the three legs read as ONE argument's parts
+      ctx.globalAlpha = ap * vp * 0.9;
+      ctx.fillStyle = tone ? tone.main : PALETTE.gold;
+      ctx.fillRect(x + w / 2 - 44, y + h - 8, 88 * vp, STROKE.accent);
+    }
     ctx.globalAlpha = ap;
-    setFont(ctx, 22 + 6, 600); // v9 (D-07): floor — "index, low→latest" caption
-    ctx.fillStyle = PALETTE.inkFaint;
-    ctx.fillText('index · low → latest', x + w / 2, y + h + 34);
     registerRect(`trio:${names[i]}`, x, y, w, h + 40);
     ctx.restore();
-    lineChart(ctx, {
-      x: x + 36, y: y + 84, w: w - 72, h: h - 90,
-      series: [{ name: '', tone: a.tone, points: a.pts as [number, number][] }],
-      p: clamp01((t - 400 - i * 250) / 700), // B18
-      t, showYAxis: false, gridLines: 2, emphasizeLast: false,
-    });
+    if (!useItems) {
+      lineChart(ctx, {
+        x: x + 36, y: y + 84, w: w - 72, h: h - 90,
+        series: [{ name: '', tone: a.tone, points: a.pts as [number, number][] }],
+        p: clamp01((t - 400 - i * 250) / 700), // B18
+        t, showYAxis: false, gridLines: 2, emphasizeLast: false,
+      });
+    } else {
+      // the item card's mini converging stroke — the leg drawing toward the
+      // center mark (the convergence grammar, kept, one stroke per card)
+      const cp0 = clamp01((t - 2100 - i * 250) / 700);
+      if (cp0 > 0) {
+        ctx.save();
+        ctx.globalAlpha = ap * cp0 * 0.8;
+        ctx.strokeStyle = tone ? tone.main : PALETTE.grid;
+        ctx.lineWidth = STROKE.accent;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x + w / 2, y + 150);
+        ctx.lineTo(x + w / 2, y + 150 + (h - 190) * easeOutCubic(cp0));
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
   });
+  // ── U-19: the cornerNote — the beat's thesis anchor, top-right (the
+  // name is literal: a corner note, out of the reading column, above the
+  // caption zone). Gold glass chip — the kickerChip grammar (U-16),
+  // right-aligned to the margin.
+  const cornerNote = s.cornerNote as string | undefined;
+  if (cornerNote) {
+    const cnP = clamp01((t - 1400) / 700);
+    if (cnP > 0) {
+      setFont(ctx, LABEL_FLOOR, 700);
+      const cnW = ctx.measureText(cornerNote.toUpperCase()).width + 60;
+      kickerChip(ctx, cornerNote.toUpperCase(), W - 60 - cnW, 196, { alpha: cnP });
+    }
+  }
   // converge → checkmark
   const cp = clamp01((t - 2600) / 900);
   // motto hand-off progress (computed early — the checkmark caption fades
@@ -2443,7 +2518,7 @@ export function aiDatacenterScene(g: SceneCtx): void {
   // can barely see is a texture; one you can see is a room.
   const horizon = H * 0.56;
   ctx.save();
-  ctx.lineWidth = 1.6;
+  ctx.lineWidth = STROKE.hairline; // U-16 ink law: perspective hairline
   // AUDIT-2 / §10.4 (report §5.3 — "no horizon fade, no gradient
   // falloff"): the perspective verticals now fade WITH DISTANCE — each
   // vertical strokes through a linear gradient that is transparent at the
@@ -3646,7 +3721,7 @@ export function ownerWorkerScene(g: SceneCtx): void {
       ctx.stroke();
       // embossed inner ring
       ctx.strokeStyle = rgba(PALETTE.goldDeep, 0.55);
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = STROKE.hairline; // U-16 ink law: embossed ring hairline
       ctx.beginPath();
       ctx.arc(0, 0, r2 * 0.62, 0, Math.PI * 2);
       ctx.stroke();

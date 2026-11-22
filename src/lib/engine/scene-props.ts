@@ -34,7 +34,10 @@ export const SCENE_PROPS: Record<string, string[]> = {
   dotGrid: ['total', 'highlight', 'caption'],
   magChips: ['chips', 'stats', 'source'],
   barsCompare: ['title', 'source', 'bars', 'flipCounter', 'rememberChip', 'yMax'],
-  trioConverge: ['motto', 'sub'],
+  // U-19 (100-JUDGE VISUAL AUDIT): items/title/cornerNote are OWNED keys
+  // now — the drawer implements them (the c1-thesis and c5-lesson beats'
+  // actual content). Silent ignores are how staged content rots.
+  trioConverge: ['motto', 'sub', 'items', 'title', 'cornerNote'],
   kDef: ['definition', 'source'],
   credibilityChips: ['kicker', 'chips', 'year'],
   gasPump: ['source', 'cards', 'caption'],

@@ -35,6 +35,60 @@ export interface EncoderStats {
   sceneLabel: string;
 }
 
+// ── U-20 (100-JUDGE VISUAL AUDIT — RENDER ECONOMY ON 8 GB) ───────────────────
+// The 1080p master renders as NINE CHAPTER CHUNKS — one pass per chapter,
+// each its own Node process with the heap capped at 4 GB
+// (--max-old-space-size=4096), stitched losslessly with an ffmpeg concat
+// (stream copy, no re-encode). The engine was already designed for the
+// machine it runs on — frames render one at a time and stream to disk —
+// so the chunk plan is the discipline, not the hardware: a chapter chunk
+// renders in 3-6 h on the Dell 8 GB laptop and the full film renders
+// overnight in three sessions. scripts/render-master.mjs walks this plan.
+export interface RenderChunk {
+  /** 1-based chapter number (1..9) */
+  index: number;
+  /** chunk start on the film's absolute timeline (ms) */
+  startMs: number;
+  /** chunk end (exclusive, ms) — the next chapter's start or the film end */
+  endMs: number;
+  /** chapter id from the script ('ch1'..'ch9') */
+  chapterId: string;
+}
+
+/**
+ * The nine chapter chunk bounds for the 1080p master pass. Pure function of
+ * the timeline: each chunk spans its chapter's beats; chunk 1 opens at 0
+ * (the cold open renders with chapter 1) and the last chunk runs to the
+ * film's end.
+ */
+export function chapterChunks(tl: {
+  durationMs: number;
+  /** TimelineBeat: the chapter index lives on the beat root (the director
+   *  reads `beat.chapter`), the spec under `beat.beat`. */
+  beats: Array<{ startMs: number; endMs: number; chapter: number; beat: { scene: { type: string } } }>;
+  chapters?: Array<{ id: string; title: string }>;
+}): RenderChunk[] {
+  // collect the chapter starts from the beat map (chapter indices are 0-based)
+  const starts = new Map<number, number>();
+  for (const b of tl.beats) {
+    const ch = b.chapter;
+    if (!starts.has(ch) || b.startMs < starts.get(ch)!) starts.set(ch, b.startMs);
+  }
+  const count = Math.max(...starts.keys()) + 1;
+  const chunks: RenderChunk[] = [];
+  for (let c = 0; c < count; c++) {
+    const startMs = c === 0 ? 0 : starts.get(c) ?? 0;
+    const endMs = c + 1 < count ? (starts.get(c + 1) ?? tl.durationMs) : tl.durationMs;
+    chunks.push({
+      index: c + 1,
+      startMs,
+      endMs,
+      chapterId: tl.chapters?.[c]?.id ?? `ch${c + 1}`,
+    });
+  }
+  return chunks;
+}
+
 export interface RenderJob {
   timeline: Timeline;
   mixBuffer: AudioBuffer;

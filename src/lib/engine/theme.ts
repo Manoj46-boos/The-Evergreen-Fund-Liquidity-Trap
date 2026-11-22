@@ -136,6 +136,38 @@ export const PALETTE: Palette = {
  *  never shrink. */
 export const TYPE_FLOOR = 40;
 
+// ── U-16 (100-JUDGE VISUAL AUDIT — THE ONE INK LAW) ──────────────────────────
+// The audit's Phase-4 prescription: the film's stroke weights were a jungle
+// (the same hairline drew at 2, 2.5 and 3 across scenes; the figure's outline
+// drifted between renderers). ONE law, three canonical weights on the 1080
+// design grid, defined here and enforced by tools/ink-law.mjs (npm run
+// lint:ink):
+//   figure   3.5px — the stickman's body ink (the silhouette must hold at
+//                    the 320px feed: 3.5px ≈ 0.58px at the gate, the
+//                    perception floor for a moving line)
+//   hairline 1.5px — grid lines, card/chip borders, foot rules, axis rails
+//                    (the "steel hairline" the design system always claimed)
+//   accent   6px   — the brand's emphasis strokes: brass rails, the pull-
+//                    quote bar, underline rules, the % glyph's porcelain edge
+// Every NEW stroke draws through strokeW() so the law has one code path;
+// legacy literals are whitelisted in the linter's certified list and any
+// unlisted NEW weight fails the gate.
+export const STROKE = {
+  figure: 3.5,
+  hairline: 1.5,
+  accent: 6,
+} as const;
+
+export type StrokeKind = keyof typeof STROKE;
+
+/** The one accessor for law-governed stroke widths (U-16). `k` names the
+ *  class of ink; the value scales ONLY with the canvas's deviation from the
+ *  1080 design grid (the film always renders on the design grid and
+ *  downscales, so the factor is 1 in every certified path). */
+export function strokeW(k: StrokeKind): number {
+  return STROKE[k];
+}
+
 /** AUDIT-ROUND-2 (fix 1): the LABEL floor — legends, axis tags, kickers,
  *  source tags and chip text. One step under the READ floor: labels are
  *  glanceable identifiers, not body copy, and 34px survives the 320px
@@ -308,17 +340,18 @@ export function card(
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
   if (border) {
-    ctx.lineWidth = 2;
+    // U-16 ink law: the card's steel border IS the hairline class
+    ctx.lineWidth = STROKE.hairline;
     ctx.strokeStyle = PALETTE.cardBorder;
     roundRect(ctx, x, y, w, h, r);
     ctx.stroke();
-    // the top-light — a 2.5px porcelain hairline on the top edge only:
+    // the top-light — the porcelain hairline on the top edge only:
     // the glass signature. Fades out down the sides.
     const hl = ctx.createLinearGradient(0, y, 0, y + Math.min(56, h));
     hl.addColorStop(0, rgba('#CFE3FF', 0.55));
     hl.addColorStop(1, rgba('#CFE3FF', 0));
     ctx.strokeStyle = hl;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = STROKE.hairline;
     ctx.beginPath();
     ctx.moveTo(x + r * 0.6, y + 1.5);
     ctx.lineTo(x + w - r * 0.6, y + 1.5);
@@ -411,7 +444,8 @@ export function chip(
   ctx.fillStyle = bg;
   roundRect(ctx, x, y, w, h, h / 2);
   ctx.fill();
-  ctx.lineWidth = 2;
+  // U-16 ink law: the chip edge is the hairline class
+  ctx.lineWidth = STROKE.hairline;
   ctx.strokeStyle = border;
   roundRect(ctx, x, y, w, h, h / 2);
   ctx.stroke();
@@ -436,6 +470,50 @@ export function chipWidth(
   const { size = 28, padX = 22, iconDot } = opts;
   setFont(ctx, size, 600);
   return ctx.measureText(text).width + padX * 2 + (iconDot ? size * 0.9 + 10 : 0);
+}
+
+// ── U-16 (100-JUDGE VISUAL AUDIT — RETIRE THE WHITE PILL KICKER) ─────────────
+// B-09 evidence: "gold text on a white pill measures roughly 2:1 — it washes
+// out at feed scale exactly on the film's payoff frame". The white pill
+// kicker class is RETIRED: every kicker/context chip in the film draws
+// through this ONE navy-glass plate — the vault card tone at 0.82, a brass
+// hairline edge (STROKE.hairline — the ink law), goldInk text (AA on the
+// navy glass). Returns the chip width like chip() so layouts can centre it.
+export function kickerChip(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  opts: { size?: number; padX?: number; alpha?: number; center?: boolean } = {}
+): number {
+  const { size = LABEL_FLOOR, padX = 30, alpha = 1, center = false } = opts;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  setFont(ctx, size, 700);
+  const tw = ctx.measureText(text).width;
+  const w = tw + padX * 2;
+  const h = size + 26;
+  const cx = center ? x - w / 2 : x;
+  // the one-light shadow joins the house rule (−5, +7), vault black
+  ctx.fillStyle = rgba(PALETTE.shadow, 0.4);
+  roundRect(ctx, cx - 5, y + 7, w, h, h / 2);
+  ctx.fill();
+  // the navy-glass body — the SAME glass the cards use, one stop darker
+  ctx.fillStyle = 'rgba(7, 14, 30, 0.82)';
+  roundRect(ctx, cx, y, w, h, h / 2);
+  ctx.fill();
+  // the brass hairline edge (the ink law's hairline weight)
+  ctx.lineWidth = STROKE.hairline;
+  ctx.strokeStyle = rgba(PALETTE.gold, 0.65);
+  roundRect(ctx, cx, y, w, h, h / 2);
+  ctx.stroke();
+  // gold text — goldInk clears AA on the navy glass (the B-09 contrast fix)
+  ctx.fillStyle = PALETTE.goldInk;
+  ctx.textAlign = 'left';
+  ctx.fillText(text, cx + padX, y + h / 2 + size * 0.36);
+  registerRect(`kickerChip:${text.slice(0, 16)}`, cx, y, w, h);
+  ctx.restore();
+  return w;
 }
 
 // ── 100-JUDGE PANEL / Phase 4 item 4.3 — THE VALUE-PLANE SYSTEM ─────────────

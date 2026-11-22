@@ -14,7 +14,7 @@ import { pivotTakeStart } from './pivots';
 import { HERO } from './perception';
 import { drawStickmanV2 } from './stickman-v2';
 import { wrapText } from './charts';
-import { registerRect } from './collision';
+import { registerRect, registerText } from './collision';
 
 function bg(g: SceneCtx, seed: number, gold = 0.4, strength = 0.72, bokeh = 0.85, furniture = true): void {
   paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
@@ -762,6 +762,24 @@ export function quoteCardScene(g: SceneCtx): void {
     }
   }
   registerRect('quoteCard:quote', ruleX, 220, blockR - ruleX, footY - 200);
+  // U-16 (the B-02 recurrence guard): the quote rows ARE display type —
+  // they register as READING text so the figure-vs-display-type pass can
+  // arbitrate them against the host's head zone (the exact defect class
+  // B-02 shipped: "the gold quote rule and the headline terminate inside
+  // the figure's head zone").
+  {
+    setFont(ctx, 58, 700, FONT_DISPLAY);
+    let qy = qY0;
+    lines.forEach((ln, i) => {
+      const lp = clamp01((t - 350 - i * 420) / 650);
+      if (lp <= 0) return;
+      wrapped[i].forEach((wl) => {
+        registerText(`quoteRow:${i}`, textX, qy - 58, ctx.measureText(wl).width, 66);
+        qy += leading;
+      });
+      qy += 14;
+    });
+  }
   // P3 (Verdict report — KILL THE WASHES): the quote card's right zone —
   // the band between the text block and the host — gains the brand K as a
   // mid-ground layer (20% alpha, gold, filling the vertical band). The
@@ -788,9 +806,14 @@ export function quoteCardScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  // host reacting
+  // host reacting — U-19 (100-JUDGE VISUAL AUDIT — THE DEAD PROPS): the
+  // `noHost` scene key was DECLARED in the ownership registry and PASSED by
+  // the c9-disclaimer beat — and silently ignored here, so the film's legal
+  // disclaimer shipped with a presenter nodding along to "this is not a
+  // recommendation". The key is wired: a noHost quote card stands the host
+  // down; the giant ghost mark + the brand K own the right zone instead.
   const hp = clamp01((t - 800) / 600);
-  if (hp > 0) {
+  if (hp > 0 && !s.noHost) {
     const gesture = (s.hostGesture as string) || 'think';
     const pose = Stickman.poseAt(t, { gesture, speaking: false });
     // v3 (panel P0-3): v2 renderer

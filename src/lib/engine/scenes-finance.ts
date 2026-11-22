@@ -17,8 +17,9 @@
 import { clamp01, easeOutCubic, easeOutQuad, easeInOutSine, hash01, springTo } from './easing';
 import {
   PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, scenePlate, chapterArch,
-  glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, toneRoom,
+  glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, toneRoom, STROKE,
 } from './theme';
+import { AMP, HERO } from './perception';
 import {
   drawPct, drawPct3D, microShake, impactRing, hazeBands, kMotifs, floatCoins,
   sparkles, camState, depthShift, ledgerScan,
@@ -59,6 +60,10 @@ function financeHost(
     declareId?: string;
     walkDur?: number;
     walkFrom?: number;
+    /** U-15 (the cold open's walk-through): ms into the BEAT before the
+     *  walk starts — the figure enters on its own cue, not at the group's
+     *  first frame. 0 (default) = the legacy walk-in. */
+    walkAt?: number;
     label?: string;
     /** U7 refinement: full-body envelope registration (the narrow-band
      *  staging for hosts that stand close to registered content — the
@@ -84,8 +89,12 @@ function financeHost(
   let walkPhase: number | undefined;
   if (opts.walkDur) {
     const from = Math.max(opts.walkFrom ?? 140, 140);
-    if (hx - from >= 120) {
-      const r = walkIn(t, from, hx, opts.walkDur, pose, scale, 5.2);
+    // U-15: the walk waits for its own cue (`walkAt` on the group clock —
+    // the cold open's beat IS the group's first beat, so beat clock and
+    // group clock agree there), then crosses on the walkIn clock.
+    const wt = t - (opts.walkAt ?? 0);
+    if (hx - from >= 120 && wt > 0) {
+      const r = walkIn(wt, from, hx, opts.walkDur, pose, scale, 5.2);
       if (r) {
         x = r.x;
         if (r.walking) { pose = r.pose; walkPhase = r.phase; }
@@ -156,17 +165,32 @@ function ledgerRow(
 // ── statReveal — the 5% cold open ────────────────────────────────────────────
 export function statRevealScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
+  // ── U-18 (100-JUDGE VISUAL AUDIT — THE DEAD WEDGE): every per-beat event
+  // in this scene (stat reveals, the limit strike, the prorate wedge, the
+  // floor labels) was keyed to the SCENE-GROUP clock. The c1-open group
+  // spans four beats (~35s): the prorate beat's wedge could only fire while
+  // the group clock read 2400-3300ms — i.e. during the FIRST beat — so the
+  // shipped reel never saw the wedge, the strike or any staged reveal after
+  // beat one. `bt` (the beat-local clock) is the law for per-beat events;
+  // `t` (the group clock) stays for scene-level continuity (the glyph's
+  // grow/turn, the kicker).
+  const bt = g.beatT;
   const mode = String(s.mode ?? 'setup');
   const opening = s.opening === true;
-  bg(g, { furniture: false, strength: 0.86 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
-
-  // the signature % — the film's brand object, lit brass on the vault
-  const growP = opening ? clamp01((t - 200) / 2300) : 1;
-  const turnP = opening ? clamp01((t - 6070) / 900) : 0;
+  // U-23 + U-15: the film's FIRST VISIBLE FRAME must match the thumbnail
+  // promise — the brass % WITH its pulled 5% slice beside it, never a bare
+  // glyph assembling on navy. The cold open's glyph is present from frame 0
+  // and lands through the squash (beat 1 of the 8-second choreography), so
+  // only the finale's re-grow (c9-return) keeps the grow-in.
+  const coldOpen = opening && mode === 'setup';
+  const growP = opening && !coldOpen ? clamp01((bt - 200) / 2300) : 1;
+  const turnP = opening ? clamp01((bt - 6070) / 900) : 0;
   const gx = W * (mode === 'prorate' || mode === 'limit' ? 0.265 : 0.30);
   const gy = H * 0.44;
   const S = 200;
+
+  bg(g, { furniture: false, strength: 0.86 });
+  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
 
   // headline kicker
   setFont(ctx, LABEL_FLOOR, 700);
@@ -177,9 +201,9 @@ export function statRevealScene(g: SceneCtx): void {
   ctx.globalAlpha = kickE;
   ctx.fillText(kick, 180, 168);
   ctx.globalAlpha = 1;
-  // the brass rule under the kicker
+  // the brass rule under the kicker — the ink law's accent weight (U-16)
   ctx.fillStyle = PALETTE.gold;
-  ctx.fillRect(180, 190, 220 * kickE, 6);
+  ctx.fillRect(180, 190, 220 * kickE, STROKE.accent);
 
   // right-side stat stack per mode
   const rx = W * 0.46;
@@ -203,16 +227,103 @@ export function statRevealScene(g: SceneCtx): void {
     ctx.restore();
   };
 
-  if (mode === 'setup') {
-    stat('$1,000,000', 'invested in a semi-liquid fund', 'gold', (t - 400) / 800);
-    stat('ALL OF IT', 'you want your capital back', 'neutral', (t - 1200) / 800, 90);
+  // ── U-15 — THE COLD OPEN, THREE BEATS IN EIGHT SECONDS ─────────────────────
+  // Beat 1 (0-0.3s): the % LANDS — a volume-preserving squash about the
+  //   glyph's ground contact + the impact ring (frame 0 already carries the
+  //   pulled slice: the thumbnail promise, U-23).
+  // Beat 2 (1.7-2.7s): the pulled slice SHEARS FREE — the prorate wedge
+  //   machinery (it exists) launches the slice at the viewer; it lands with
+  //   the squash grammar + ring + micro-shake.
+  // Beat 3 (4.0-5.3s): the $1M-to-$50k STRIKE-THROUGH — the coral line cuts
+  //   the million and the number resolves to the fifty-thousand exit.
+  // Plus: one figure walk-through crossing the stage at 4s (enter 3.2s,
+  //   plant 5.4s), and the 6% dolly (director.ts hero move, U-15).
+  // No window in the first 8s may sit event-dead longer than 0.8s — the
+  // U-10 cadence gate enforces it on every run.
+  const coldSquashAge = bt;
+  const coldSquash = coldOpen && coldSquashAge >= 0 && coldSquashAge < 300
+    ? Math.sin((coldSquashAge / 300) * Math.PI)
+    : 0;
+
+  if (coldOpen) {
+    // BEAT 1 — the landing event at frame 0 (the ring reads even on the
+    // very first rendered frame; the squash follows through 300ms).
+    impactRing(ctx, gx, gy + S * 1.1, bt, 40, 190, 1.5);
+    // BEAT 3 — the strike-through and the resolution
+    const strikeP = clamp01((bt - 4000) / 500);
+    const resolveP = clamp01((bt - 4500) / 300);
+    // slot 1: the million, present from 0.5s
+    const mE = easeOutCubic(clamp01((bt - 500) / 800));
+    if (mE > 0) {
+      ctx.save();
+      ctx.globalAlpha = mE * (1 - 0.72 * resolveP); // the struck ghost demotes
+      setFont(ctx, 120, 700, FONT_DISPLAY);
+      ctx.fillStyle = PALETTE.goldDisplay;
+      registerText('stat:$1,000,000', rx, ry - 120, Math.min(ctx.measureText('$1,000,000').width, 900), 132);
+      ctx.fillText('$1,000,000', rx, ry, 900);
+      ctx.restore();
+      if (resolveP > 0) {
+        // the fifty-thousand exit punches into the slot (down tone)
+        ctx.save();
+        const pk = 1 + (1 - easeOutCubic(resolveP)) * 0.24;
+        ctx.globalAlpha = easeOutCubic(resolveP);
+        ctx.translate(rx + 240, ry - 44);
+        ctx.scale(pk, pk);
+        ctx.translate(-(rx + 240), -(ry - 44));
+        setFont(ctx, 96, 700, FONT_DISPLAY);
+        ctx.fillStyle = PALETTE.down;
+        registerText('stat:$50,000', rx, ry - 96, Math.min(ctx.measureText('$50,000').width, 900), 106);
+        ctx.fillText('$50,000', rx, ry, 900);
+        ctx.restore();
+      }
+      if (strikeP > 0) {
+        // the strike — the misread dies on screen (the limit beat's own
+        // stroke grammar, borrowed for the cold open's third beat)
+        ctx.save();
+        ctx.strokeStyle = PALETTE.downVivid;
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.92 * (1 - 0.55 * resolveP);
+        ctx.beginPath();
+        ctx.moveTo(rx - 20, ry - 40);
+        ctx.lineTo(rx - 20 + (W - rx - 200) * 0.62 * strikeP, ry - 14);
+        ctx.stroke();
+        ctx.restore();
+      }
+      // the label under slot 1 — swaps with the number
+      const lE = easeOutCubic(clamp01((bt - 500) / 800));
+      ctx.save();
+      setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
+      ctx.globalAlpha = lE * (1 - resolveP);
+      ctx.fillStyle = PALETTE.inkSoft;
+      ctx.fillText('invested in a semi-liquid fund', rx, ry + 114);
+      ctx.globalAlpha = resolveP;
+      ctx.fillStyle = PALETTE.inkSoft;
+      ctx.fillText('your exit, before any change in value or applicable fees', rx, ry + 114);
+      ctx.restore();
+      ry += 120 * 0.52 + 52 + 50 + 34;
+    }
+    stat('ALL OF IT', 'you want your capital back', 'neutral', (bt - 1200) / 800, 90);
+    // the closing event at 7s — the question the whole film answers
+    const qE = easeOutCubic(clamp01((bt - 7000) / 700));
+    if (qE > 0) {
+      ctx.save();
+      ctx.globalAlpha = qE;
+      setFont(ctx, LABEL_FLOOR, 700);
+      ctx.fillStyle = PALETTE.goldInk;
+      ctx.textAlign = 'center';
+      ctx.fillText('THE 5% QUESTION', gx, gy + S * 1.62);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
   } else if (mode === 'offer') {
-    stat('5% / QUARTER', 'the fund offers quarterly liquidity', 'up', (t - 400) / 800, 104);
-    stat('THE ASSUMPTION', 'in an orderly market, you can work your way out over time', 'neutral', (t - 1300) / 800, 64);
+    stat('5% / QUARTER', 'the fund offers quarterly liquidity', 'up', (bt - 400) / 800, 104);
+    stat('THE ASSUMPTION', 'in an orderly market, you can work your way out over time', 'neutral', (bt - 1300) / 800, 64);
   } else if (mode === 'limit') {
-    stat('5% OF THE FUND', 'a limit on the fund — not a personal allowance', 'down', (t - 300) / 800, 96);
-    // the strike — the misread dies on screen
-    const sp = clamp01((t - 1400) / 500);
+    stat('5% OF THE FUND', 'a limit on the fund — not a personal allowance', 'down', (bt - 300) / 800, 96);
+    // the strike — the misread dies on screen (U-18: keyed to the BEAT clock,
+    // so the strike fires inside THIS beat, not during beat one)
+    const sp = clamp01((bt - 1400) / 500);
     if (sp > 0) {
       ctx.save();
       ctx.strokeStyle = PALETTE.downVivid;
@@ -225,24 +336,49 @@ export function statRevealScene(g: SceneCtx): void {
       ctx.stroke();
       ctx.restore();
     }
-    stat('NOT 5% OF YOUR POSITION', 'the same number means two different things', 'gold', (t - 1900) / 800, 58);
+    stat('NOT 5% OF YOUR POSITION', 'the same number means two different things', 'gold', (bt - 1900) / 800, 58);
   } else if (mode === 'prorate') {
-    stat('REQUESTED: 100%', 'everyone asks to leave at once', 'neutral', (t - 300) / 700, 72);
-    stat('PAID: 5%', 'the fund may repurchase only five percent of its shares', 'down', (t - 1100) / 700, 96);
-    stat('$1,000,000 → $50,000', 'your exit, before any change in value or applicable fees', 'gold', (t - 1900) / 800, 62);
-    const ringP = clamp01((t - 2000) / 600);
-    if (ringP > 0) impactRing(ctx, rx + 240, ry - 160, t, t - 30, 150, 1.4);
+    stat('REQUESTED: 100%', 'everyone asks to leave at once', 'neutral', (bt - 300) / 700, 72);
+    stat('PAID: 5%', 'the fund may repurchase only five percent of its shares', 'down', (bt - 1100) / 700, 96);
+    stat('$1,000,000 → $50,000', 'your exit, before any change in value or applicable fees', 'gold', (bt - 1900) / 800, 62);
+    const ringP = clamp01((bt - 2000) / 600);
+    if (ringP > 0) impactRing(ctx, rx + 240, ry - 160, bt, 2000, 150, 1.4);
   } else if (mode === 'return' || mode === 'misread') {
-    stat('$1,000,000', 'the million dollars, again', 'gold', (t - 300) / 800, 110);
+    stat('$1,000,000', 'the million dollars, again', 'gold', (bt - 300) / 800, 110);
     if (mode === 'misread') {
-      stat('THE MISREAD', 'a fund-level repurchase mechanism — taken as a personal guarantee', 'down', (t - 1200) / 800, 60);
+      stat('THE MISREAD', 'a fund-level repurchase mechanism — taken as a personal guarantee', 'down', (bt - 1200) / 800, 60);
     } else {
-      stat('THE QUESTION', 'does the exit button work at the size you need?', 'neutral', (t - 1200) / 800, 58);
+      stat('THE QUESTION', 'does the exit button work at the size you need?', 'neutral', (bt - 1200) / 800, 58);
     }
   }
 
-  // the % glyph — drawn LAST so it overlaps the stat stack edge (depth)
-  drawPct3D(ctx, gx, gy, S, growP, t, true, turnP);
+  // the % glyph — drawn LAST so it overlaps the stat stack edge (depth).
+  // U-15 beat 1: the cold open's glyph carries the landing squash (about
+  // the ground contact, volume-preserving) — and the room's micro-shake
+  // answers the landing. U-18: on the twist beat ('misread') the glyph
+  // CRACKS along its slash — halves separate 20px with the spring settle,
+  // the fracture seam flashes once, the room shakes once.
+  const twistCrack = mode === 'misread';
+  const crackAge = twistCrack ? bt - 2600 : -1;
+  const coldShake = coldOpen ? microShake(bt, 0, HERO.shakePx * 0.7) : { dx: 0, dy: 0 };
+  const crackShake = twistCrack && crackAge >= 0 && crackAge < 320
+    ? microShake(bt, 2600, HERO.shakePx)
+    : { dx: 0, dy: 0 };
+  {
+    ctx.save();
+    ctx.translate(coldShake.dx + crackShake.dx, coldShake.dy + crackShake.dy);
+    if (coldSquash > 0) {
+      ctx.translate(gx, gy + S * 1.3);
+      ctx.scale(1 + 0.14 * coldSquash, 1 - 0.18 * coldSquash);
+      ctx.translate(-gx, -(gy + S * 1.3));
+    }
+    drawPct3D(ctx, gx, gy, S, growP, t, true, turnP, twistCrack ? 1 : 0, crackAge);
+    ctx.restore();
+  }
+  if (twistCrack && crackAge >= 0 && crackAge < 380) {
+    // the crack is a BODY event — the impact ring answers it (beat clock)
+    impactRing(ctx, gx, gy, bt, 2600, 220, 1.6);
+  }
   const heroP = clamp01(growP);
   registerHeroObject(g.beat.scene.sceneKey ?? 'statReveal', 'pct-glyph', S * 1.9, S * 2.6, W, H);
   registerRect('statReveal:pct', gx - S * 0.9, gy - S * 1.25, S * 1.8, S * 2.5);
@@ -255,18 +391,56 @@ export function statRevealScene(g: SceneCtx): void {
   // on-landing + impactRing + microShake — the film's best object and its
   // best motion grammar in one frame. D18: the first 15 seconds now carry
   // a living anchor welded to the promise.
+  //
+  // ── U-15 (THE COLD OPEN'S WALK-THROUGH): the opening beat's figure
+  // enters offscreen-left at 3.2s and CROSSES the stage — mid-stride at the
+  // 4s mark — planting beside the glyph at 5.4s. The walk is the beat's
+  // bridge event between the wedge landing and the strike-through.
+  // ── U-18 (THE DEAD WEDGE, FIXED): the wedge events key to the BEAT clock
+  // (`bt`), so the shear fires inside its own beat — in the cold open at
+  // 1.7s (the pulled slice shears free and flies at the viewer), in the
+  // prorate beat at 2.4s (same grammar, the film's payoff moment).
   {
     const hostRig = 1.7;                       // U3: companion rigs rise
-    const hxR = gx - 150;                      // the stage block beside the glyph
+    // the host plants on the LEFT stage block (clear of the stat column at
+    // rx=883 — the 806 staging plated the $1M slot); the cold open's
+    // walk-through CROSSES the left third to reach it, mid-stride at 4s.
+    const hxR = gx - 150;
     const hyR = H * 0.675;
-    const walkDurR = 1800;
-    // the wedge event (prorate): 5% of the disc shears off, flies at the
-    // viewer, lands with the impact grammar
-    const wedgeT0 = 2400, wedgeLand = 3300;
-    const wedgeP = mode === 'prorate' ? clamp01((t - wedgeT0) / (wedgeLand - wedgeT0)) : 0;
-    const wx = gx + S * 0.42 + wedgeP * wedgeP * 330;
-    const wy = gy - S * 0.30 + wedgeP * 250;
+    const wedgeT0 = coldOpen ? 1700 : 2400;
+    const wedgeLand = coldOpen ? 2700 : 3300;
+    const wedgeP = mode === 'prorate' || coldOpen ? clamp01((bt - wedgeT0) / (wedgeLand - wedgeT0)) : 0;
+    // the wedge's rest position — BESIDE the glyph (the pulled 5% slice the
+    // thumbnail promises). At bt < wedgeT0 the cold open SHOWS it resting
+    // there (the first-frame contract, U-23); the shear then launches it.
+    const restWx = gx + S * 1.0, restWy = gy - S * 0.30;
+    const wx = restWx + wedgeP * wedgeP * (S * 0.42 + 330 - S * 0.55);
+    const wy = restWy + wedgeP * wedgeP * (gy - S * 0.30 + 250 - restWy);
     const wedgeScale = 1 + wedgeP * 0.6;
+    // the resting pulled slice — visible from FRAME 0 on the cold open
+    if (coldOpen && wedgeP <= 0) {
+      ctx.save();
+      // the brass halo — the slice is the promise, it carries light
+      const glow = ctx.createRadialGradient(restWx, restWy, 4, restWx, restWy, S * 0.62);
+      glow.addColorStop(0, rgba(PALETTE.goldDisplay, 0.30));
+      glow.addColorStop(1, rgba(PALETTE.goldDisplay, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(restWx, restWy, S * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.translate(restWx, restWy);
+      ctx.rotate(-0.06 + Math.sin(t / 900) * 0.03); // the hover breathe
+      ctx.fillStyle = PALETTE.goldDisplay;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, S * 0.40, -0.35, 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.8);
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
     if (wedgeP > 0 && wedgeP < 1) {
       // the flying wedge — an 18° brass pie slice with the porcelain edge
       ctx.save();
@@ -286,11 +460,13 @@ export function statRevealScene(g: SceneCtx): void {
     }
     if (wedgeP >= 1) {
       // THE LANDING — squash-on-landing (U11), impact ring + micro-shake
-      const age = t - wedgeLand;
+      // (all keyed to the BEAT clock — the ring fires inside its own beat)
+      const age = bt - wedgeLand;
       const squashP = age >= 0 && age < 300 ? Math.sin((age / 300) * Math.PI) : 0;
       ctx.save();
       ctx.translate(gx + S * 0.42 + 330, gy - S * 0.30 + 250);
       ctx.scale(1 + 0.16 * squashP, 1 - 0.2 * squashP);
+      ctx.rotate(Math.sin(t / 900) * 0.03); // the settle breathe
       ctx.fillStyle = PALETTE.goldDisplay;
       ctx.beginPath();
       ctx.moveTo(0, 0);
@@ -301,26 +477,31 @@ export function statRevealScene(g: SceneCtx): void {
       ctx.lineWidth = 3;
       ctx.stroke();
       ctx.restore();
-      impactRing(ctx, gx + S * 0.42 + 330, gy - S * 0.30 + 250, t, wedgeLand, 130, 1.3);
+      impactRing(ctx, gx + S * 0.42 + 330, gy - S * 0.30 + 250, bt, wedgeLand, 130, 1.3);
     }
-    // the host — walks in beside the glyph, then brackets the stem
+    // the host — the cold open WALKS THROUGH at 4s (enter 3.2s, cross the
+    // left third mid-stride, plant 5.4s); other beats walk in from the
+    // group's start and bracket the stem.
     financeHost(g, hxR, Math.min(hyR, H * 0.64), hostRig, {
       seed: 4.2,
       gesture: 'present',
       glanceBias: 0.9,
-      walkDur: walkDurR,
-      walkFrom: Math.max(140, hxR - 460),
-      contact: {
-        x: gx - S * 0.14, y: gy + S * 0.42,
-        hand: 'fist', easeAt: walkDurR + 200,
-      },
-      declareId: 'statReveal:pct',
+      walkDur: coldOpen ? 2200 : 1800,
+      walkAt: coldOpen ? 3200 : 0,
+      walkFrom: 140,
+      contact: coldOpen
+        ? undefined
+        : {
+            x: gx - S * 0.14, y: gy + S * 0.42,
+            hand: 'fist', easeAt: 2000,
+          },
+      declareId: coldOpen ? undefined : 'statReveal:pct',
       label: 'pct-host',
     });
   }
   // the floor label under the glyph
   if (mode === 'limit' || mode === 'prorate') {
-    const e = easeOutCubic(clamp01((t - 2300) / 600));
+    const e = easeOutCubic(clamp01((bt - 2300) / 600));
     if (e > 0) {
       setFont(ctx, LABEL_FLOOR, 700);
       ctx.fillStyle = PALETTE.goldInk;

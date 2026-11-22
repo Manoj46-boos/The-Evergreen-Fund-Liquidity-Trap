@@ -277,7 +277,7 @@ function groupAt(tl: Timeline, tMs: number): Group | null {
  * amt px of either band; every hero move is now truck or push/pullback,
  * and guard v2 (edge + fixed-furniture checks) sweeps all of them.
  */
-const HERO_MOVES: Record<number, { scene: string; move: 'pullback' | 'push' | 'truck' | 'rise'; amt: number }> = {
+const HERO_MOVES: Record<number, { scene: string; key?: string; move: 'pullback' | 'push' | 'truck' | 'rise'; amt: number }> = {
   // P1-9 (report §12.9): every hero amplitude ×1.4 — the v3 camera nearly
   // doubled v2 and still read sub-threshold on a phone; the panel's bar for
   // a "hero" gesture is a move you can screenshot.
@@ -298,7 +298,14 @@ const HERO_MOVES: Record<number, { scene: string; move: 'pullback' | 'push' | 't
   // below — the host corridor has no headroom; its 24% empty-band fix
   // came from content, not camera). takeaways' push holds (the reading
   // column owns the width).
-  0: { scene: 'divergeK', move: 'pullback', amt: 0.16 },      // ch1 — the K reveals itself as the camera retreats (2x)
+  // U-15 (100-JUDGE VISUAL AUDIT — THE COLD OPEN'S DOLLY): the old ch1 hero
+  // move targeted 'divergeK' — a scene that no longer exists in this film's
+  // script (the cold open is statReveal/c1-open), so chapter 1 shipped with
+  // NO hero gesture at all. The audit hands the move to the cold open: a 6%
+  // dolly across the FIRST EIGHT SECONDS (the three-beat choreography's own
+  // camera), then held. The `key` field scopes the move to the sceneKey —
+  // the finale's statReveal reprise (c9-return) keeps its own grammar.
+  0: { scene: 'statReveal', key: 'c1-open', move: 'push', amt: 0.06 },
   1: { scene: 'chartJourney', move: 'truck', amt: 240 },      // ch2 — travel with the S&P timeline · PLAYBOOK D3: 380→240 (guard-certified)
   2: { scene: 'chartJourney', move: 'truck', amt: -220 },    // ch3 — sentiment falls, the camera pans the other way · PLAYBOOK D3: -300→-220 (guard-certified)
   3: { scene: 'gasPump', move: 'truck', amt: 360 },           // ch4 — pan between the two households (1.7x)
@@ -457,8 +464,16 @@ function cameraV2(
     const drawP = clamp01(gt / 2600);
     camX += (0.5 - easeOutCubic(drawP)) * 32;
   }
-  // P1-2: the chapter's hero move — one amplified gesture per chapter
+  // P1-2: the chapter's hero move — one amplified gesture per chapter.
+  // U-15: a move MAY be scoped to one sceneKey (`key`) — the cold open's
+  // 6% dolly rides the FIRST EIGHT SECONDS (eased over 8000ms, held after)
+  // instead of the whole group. The scene-type match STAYS the primary
+  // gate (a chapter's hero move belongs to its hero scene only — dropping
+  // it would ride every scene in the chapter and sweep-violate every
+  // certified envelope).
   const hero = HERO_MOVES[chapterIdx];
+  const heroScoped =
+    !!hero && hero.scene === sceneType && (!hero.key || hero.key === sceneKey);
   let roll = 0; // P1-9: 0.2° roll rides the trucks (see HERO_MOVES note)
   // P2-4 (100-judge audit, Table 4 — "one true dolly-with-rotate on the
   // formation"): the cold open's K formation gets the film's only
@@ -478,17 +493,22 @@ function cameraV2(
     camScale += 0.07 * e;
     roll += 1.1 * (1 - rel) * (Math.PI / 180); // panel r4: 1.1° — unmistakable on the rules, still subtle
   }
-  if (hero && hero.scene === sceneType) {
-    const e = easeInOutSine(p);
-    if (hero.move === 'pullback') camScale -= hero.amt * e;
-    else if (hero.move === 'push') camScale += hero.amt * e;
+  if (hero && heroScoped) {
+    // U-15: the cold open's dolly releases across the first 8 seconds and
+    // HOLDS (the panel's hold-the-move rule from the divergeK dolly — a
+    // windowed move pops the scale back at its edge).
+    const heroE = hero.key === 'c1-open'
+      ? easeInOutSine(clamp01(gt / 8000))
+      : easeInOutSine(p);
+    if (hero.move === 'pullback') camScale -= hero.amt * heroE;
+    else if (hero.move === 'push') camScale += hero.amt * heroE;
     else if (hero.move === 'truck') {
-      camX += hero.amt * (e - 0.5);
+      camX += hero.amt * (heroE - 0.5);
       // the roll peaks mid-truck and is exactly 0 at both ends — no pop in,
       // no pop out; ≤3.4px of corner displacement at 0.2°
-      roll = 0.2 * (Math.PI / 180) * Math.sin(Math.PI * e);
+      roll = 0.2 * (Math.PI / 180) * Math.sin(Math.PI * heroE);
     }
-    else if (hero.move === 'rise') camY -= hero.amt * e;
+    else if (hero.move === 'rise') camY -= hero.amt * heroE;
   }
   // AUDIT-ROUND-2 (fix 27 — SCENE-GROUP CAPS, the mid-scene REFRAME): any
   // group longer than 12 seconds holding ONE staging is a swipe risk

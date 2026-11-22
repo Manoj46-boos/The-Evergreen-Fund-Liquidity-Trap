@@ -118,15 +118,26 @@ export const REACTIONS: Record<string, ReactionSpec> = {
   // (c7-paradox / c8-fund / c9-three) belonged to a previous film's
   // script and matched NOTHING in this timeline, so the reaction
   // machinery (camera push, DOF, veil, hero take) NEVER fired once.
-  //   c4-trade   — the twist ("Not a contradiction. It is the trade.")
-  //   c5-both    — the paradox resolve ("Both — at different dates.")
-  //   c9-window  — the final takeaway ("5% ≠ YOUR EXIT")
-  // The scene drawers run the hero close-up staging (rig 3.1-3.3,
+  // The scene drawers run the hero close-up staging (rig 2.2-3.3,
   // faceScale 1.8) inside these windows; the director's push/veil/DOF
   // consume the SAME clocks below.
-  'c4-trade': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 1390, py: 560 },
-  'c5-both': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.fund, px: 1390, py: 560 },
-  'c9-window': { atFrac: 0.32, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.three, px: 620, py: 560 },
+  //
+  // ── U-17 (100-JUDGE VISUAL AUDIT — UN-RATION THE CLOSE-UP): the audit's
+  // arithmetic — "currently used three times in 126 beats" — convicted the
+  // ration. The reaction grammar is the CHEAPEST premium shot in the engine,
+  // and it now covers the EIGHT highest-stakes beats: every chapter pivot
+  // plus the twist. Windows stay at AMP.reactionWindowMs (1600 — the audit's
+  // 1.6s cap); amplitudes keep the certified per-family calibration
+  // (bigText 0.34, stampCard 0.30-0.32 — the wide-reading-column scenes run
+  // gentler and let the face carry the emotion; the guard sweep referees).
+  'c1-question': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 1390, py: 560 },  // ch1 pivot — "the exit button works — at the size you need?"
+  'c2-launchcount': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: 0.30, px: 620, py: 560 },                  // ch2 pivot — "A LAUNCH COUNT — not assets"
+  'c3-contract': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: 0.30, px: 620, py: 560 },                     // ch3 pivot — "COMPARE THE CONTRACT"
+  'c4-trade': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 1390, py: 560 },    // THE TWIST — "Not a contradiction. It is the trade."
+  'c5-both': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.fund, px: 1390, py: 560 },        // the paradox resolve — "Both — at different dates."
+  'c6-transfer': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: 0.30, px: 620, py: 560 },                     // ch6 pivot — "NAV MOVES VALUE"
+  'c7-correct': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 1390, py: 560 },  // ch7 pivot — "An efficient implementation tool"
+  'c9-window': { atFrac: 0.32, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.three, px: 620, py: 560 },     // the final takeaway — "5% ≠ YOUR EXIT"
 };
 
 /**

@@ -204,16 +204,23 @@ export function drawThumbnail(
   ctx.fill();
 
   // ── CHARACTER: the host, braced, pulling the slice with a rope ──
+  // U-22 (the v3 poster spec): the FACE reads at 25%+ of frame height —
+  // the poster figure draws at SC 2.5 (the head alone ≈ 270px of 1080),
+  // the scroll-stopper scale. The rope anchors to the HAND (offsets
+  // parameterized by SC), so the rope can never detach from the grip.
   {
-    const fx = W * 0.16;
+    const SC = 2.5;
+    const fx = W * 0.14;
     const fy = H * 1.24; // pelvis below the bottom edge — 3/4 staging
-    const SC = 2.15;
-    // the rope — from the host's hand to the slice
+    // the rope — from the host's hand to the slice (hand-tracked anchor:
+    // the pointR fist sits at (118, 171) rig units in the poster pose)
+    const handX = fx + 118 * SC;
+    const handY = fy - 171 * SC;
     ctx.strokeStyle = 'rgba(234, 242, 255, 0.8)';
     ctx.lineWidth = 6;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(W * 0.205, H * 0.55);
+    ctx.moveTo(handX, handY);
     ctx.quadraticCurveTo(W * 0.30, H * 0.62, sliceGlowX, sliceGlowY + 8);
     ctx.stroke();
     ctx.save();

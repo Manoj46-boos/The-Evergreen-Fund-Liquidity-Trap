@@ -24,9 +24,9 @@
  *  §8/C4 stroke weights + face features sized to survive the 320px feed.
  */
 
-import { PALETTE, rgba, roundRect, hexLerp } from './theme';
+import { PALETTE, rgba, roundRect, hexLerp, STROKE } from './theme';
 import { clamp, clamp01, hash01, easeOutCubic } from './easing';
-import { registerRect } from './collision';
+import { registerRect, registerFigure } from './collision';
 import { camState } from './effects';
 import { AMP, INK } from './perception';
 // PHASE 3 COMPOSITION (Visual Audit — Composition & value): subject
@@ -1284,7 +1284,7 @@ function scarfTail(
   // the fold crease — the one seam a real scarf HAS (the two-tone hint
   // at the bend, in the under colour)
   ctx.strokeStyle = rgba(colUnder, 0.85);
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = STROKE.hairline; // U-16 ink law: under-bend hairline
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(fxp - 3, fyp - 1.2);
@@ -1652,6 +1652,17 @@ export function drawStickmanV2(
   // clearing the 2-row caption pill (pill top ≈ 732; envelope bottom = 670).
   // The visual shadow + contact line still draw to their full extent below
   // the feet; only the guard's certified envelope stops at the soles.
+  // U-16 (100-JUDGE VISUAL AUDIT — FIGURE-VS-DISPLAY-TYPE): EVERY figure
+  // registers its head/chest envelope (crown to chest bottom, the zone a
+  // headline/quote rule/display numeral must never terminate in — the B-02
+  // class). Same design-space geometry the hostBody bands use, so the
+  // envelope is rig-true at every scale. The guard's figureType pass
+  // arbitrates against the reading-text registry; designed touches are
+  // declared via declareHostContact as anywhere else.
+  registerFigure(
+    `figureHead@${Math.round(cx)},${Math.round(groundY)}`,
+    cx - 40 * scale, groundY - 241 * scale, 80 * scale, 181 * scale
+  );
   if (r.hostBody) {
     // CONTACT VERBS: while a hand is planted on a scene object the certified
     // body envelope narrows to the body core (the reaching arm is accounted
@@ -2185,12 +2196,13 @@ export function drawStickmanV2(
     ctx.closePath();
     ctx.fill();
     // PLAYBOOK P2 — THE DRAWN OUTLINE: the same path stroked in ink at
-    // 3.5px, with the neck→shoulder junctions pinched concave (the
-    // trapezius read). A filled capsule reads as clip-art; a stroked
-    // contour reads as drawn. Stroke runs INSIDE the fill edge so the
-    // silhouette width is unchanged for the collision guard.
+    // the U-16 ink law's FIGURE weight (3.5px at 1080p), with the
+    // neck→shoulder junctions pinched concave (the trapezius read). A
+    // filled capsule reads as clip-art; a stroked contour reads as drawn.
+    // Stroke runs INSIDE the fill edge so the silhouette width is
+    // unchanged for the collision guard.
     ctx.strokeStyle = ink;
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = STROKE.figure;
     ctx.stroke();
     // P1 — THE GOLD VEST PANEL: same torso rail, FP0 two-tone split at the
     // 50% torso line (vest owns the chest band 0.50..0.98, the tee owns the
