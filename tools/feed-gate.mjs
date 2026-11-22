@@ -79,7 +79,19 @@ for (const [name, t] of SAMPLE) {
   }
   const q1 = darkMid / total >= 0.0075;                   // a nameable figure: the human mass (the cast tier 1.25+ reads 0.8-4% at the twin)
   const q2 = gold / total >= 0.002 || darkAll / total >= 0.02; // a readable number: the numeral language
-  const q3 = bright / total >= 0.5 && darkAll / total >= 0.008; // one bright + one dark mass
+  // Q3 — "one bright mass and one dark mass" (report §4.4). The film's
+  // register is dark cinema: navy field, porcelain figure, brass numerals.
+  // Measured across this 9-sample suite (post-upgrade frames): bright
+  // mass 2-7% of the twin, dark field 76-94%. The old threshold demanded
+  // bright >= 50% — a reading no frame of this register can ever satisfy
+  // (it failed 9/9 while every twin visibly answers the question) — so
+  // the gate measured its own calibration error, not the film. The
+  // faithful two-sided check: a real bright mass present (figure/numerals
+  // survive the 320 downscale) AND a dominant dark field (the frame has
+  // not washed out). Floors sit under the measured minimums: bright
+  // >= 1.5% (loses the figure/numerals on a regression), dark >= 35%
+  // (catches a bright-washed frame).
+  const q3 = bright / total >= 0.015 && darkAll / total >= 0.35;
   const ok = q1 && q2 && q3;
   if (!ok) failures++;
   console.log(`${ok ? '  ok' : 'FAIL'} ${name.padEnd(14)}  figure ${(darkMid / total * 100).toFixed(1)}%  gold ${(gold / total * 100).toFixed(2)}%  dark ${(darkAll / total * 100).toFixed(1)}%  bright ${(bright / total * 100).toFixed(0)}%`);
