@@ -1281,6 +1281,19 @@ export function irisWipe(
   const cy = H * 0.5;
   const R = H * (0.28 + 0.9 * e);
   ctx.save();
+  // 100-JUDGE VISUAL AUDIT (U-14 — GIVE TRANSITIONS MASS): the sweep was
+  // "a thin gold ring arc" — the brand's own transition was the quietest
+  // element on screen. The iris now carries MASS: (a) the swept disc
+  // FILLS with a 12% ink wash (the wipe reads as a liquid lens passing
+  // over the frame, not a circle outline), and (b) the ring's leading
+  // edge gets a bright edge highlight — the light catching the front of
+  // the sweep. Ring + wash + edge + shimmer: an event, not a hairline.
+  // the ink wash — the swept area carries 12% ink
+  ctx.globalAlpha = a * 0.12;
+  ctx.fillStyle = PALETTE.shadow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
   // the veil — the navy glass breath that precedes the ring
   ctx.globalAlpha = a * 0.10;
   ctx.fillStyle = PALETTE.bgTop;
@@ -1295,6 +1308,15 @@ export function irisWipe(
   ctx.lineWidth = 26 * (0.5 + a * 0.5);
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.stroke();
+  // the LEADING-EDGE HIGHLIGHT (U-14): one bright ivory arc on the
+  // sweep's front edge (the direction the iris travels: left → right)
+  ctx.globalAlpha = a * 0.95;
+  ctx.strokeStyle = rgba('#FFFBEA', 0.95);
+  ctx.lineWidth = 7;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R + 13, -Math.PI * 0.16, Math.PI * 0.16);
   ctx.stroke();
   // the inner ice ring — the liquid catch-light, a beat behind
   ctx.globalAlpha = a * 0.5;

@@ -25,7 +25,10 @@
 import { PALETTE, FONT_UI, FONT_DISPLAY, rgba, roundRect, setFont } from './theme';
 import { drawPct } from './effects';
 import { POSES } from './stickman';
-import { drawStickmanV2 } from './stickman-v2';
+// U-04 — ONE COSTUME LAW: the poster renders through the SAME drawHost
+// wrapper the film stages with — the packaging costume and the film
+// costume are one garment by construction, not by discipline.
+import { drawHost } from './stickman-v2';
 
 /** Tapered stroke helper (thick-to-thin polygon with round caps). */
 function taper(
@@ -216,7 +219,9 @@ export function drawThumbnail(
     ctx.save();
     ctx.translate(fx, fy);
     ctx.scale(SC, SC);
-    drawStickmanV2(ctx, 0, 0, 1, 3600, {
+    // U-04: the wrapper door — the poster's host carries the same frozen
+    // costume (blazer + pocket square + scarf + ivory egg) the film draws.
+    drawHost(ctx, 0, 0, 1, 3600, {
       pose: POSES.pointR,
       talk: 0.4, faceScale: 1.12, jaw2x: 1.15,
       look: 0.3, parallax: false,

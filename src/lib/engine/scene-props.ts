@@ -43,7 +43,7 @@ export const SCENE_PROPS: Record<string, string[]> = {
   statCards: ['source', 'cards', 'cornerNote'], // cornerNote: U7 companion context line (rendered by statCardsScene)
   ownerWorker: ['left', 'right'],
   fundSplit: ['stats', 'callbackChip'],
-  oddsSpread: ['source', 'markers', 'kicker', 'closer'],
+  oddsSpread: ['source', 'markers', 'kicker', 'closer', 'title'], // U-07: the title prop joins the rotation (default preserved)
   bigText: ['lines'],
   stampCard: ['stamp', 'sub', 'expression', 'kicker', 'stampTone'],
   quoteCard: ['kicker', 'lines', 'icon', 'soft', 'hostGesture', 'sub', 'noHost'],
@@ -101,10 +101,14 @@ const KNOWN_DEAD: Record<string, string> = {
  *   pointed-at  — the gesture cone owns the object (chips, bubbles, tags)
  *   refusal     — the deliberate crossed-arm stance owns the data beat
  *                 (the sanctioned non-contact verb)
+ *   pushed      — the hand MOVES the object along a rail to a docking
+ *                 point (U-02's sanction for the former bare-underline
+ *                 push; a pushed prop may only touch NUMERALS, CARD
+ *                 EDGES or CHART POINTS — never open space)
  */
 export type PropVerb =
   | 'held' | 'palm' | 'tap' | 'fist' | 'bracket'
-  | 'fired-by' | 'pointed-at' | 'refusal';
+  | 'fired-by' | 'pointed-at' | 'refusal' | 'pushed';
 
 export interface PropOwnership {
   prop: string;
@@ -139,16 +143,32 @@ export const PROP_OWNERSHIP: PropOwnership[] = [
   // ── fired-by (emission flows) ───────────────────────────────────────────
   { prop: 'ownerWorker coin flow', owner: 'fired from the worker\u2019s plateau, landing on the owner\u2019s rise', verb: 'fired-by', where: 'ownerWorker' },
   { prop: 'gas pump shorts coins', owner: 'fired from the pump\u2019s $/GAL display', verb: 'fired-by', where: 'shorts/pump' },
-  // ── pointed-at / annotated ──────────────────────────────────────────────
+  // ── pointed-at / annotated ──────────────────────────────────────────
   { prop: 'worker paycheck arrow', owner: 'the worker\u2019s flat run (terminal mark, coral tag names it)', verb: 'pointed-at', where: 'ownerWorker' },
   { prop: 'comment bubbles', owner: 'the commentPrompt host\u2019s gesture cone (the field he invites)', verb: 'pointed-at', where: 'commentPrompt' },
   { prop: 'recession debates cards', owner: 'the gauge host\u2019s gesture cone + gaze', verb: 'pointed-at', where: 'recessionGauge' },
+  // ── the family set pieces (U-06 — the desk stack / charts-on-desk /
+  // ledger folio): every stage family owns ONE piece of furniture a hand
+  // can touch; the presenting host's gesture cone owns it when the beat
+  // stages him near the desk foot (film-wide sanction, one per family).
+  { prop: 'desk stack (ledger sheets + pen cup)', owner: 'the host-family stage\u2019s left-foot furniture \u2014 the presenting host\u2019s reachable set piece', verb: 'pointed-at', where: 'host family (stage.ts set piece)' },
+  { prop: 'charts-on-desk (chart card + bars)', owner: 'the data-family stage\u2019s left-foot furniture \u2014 the presenting host\u2019s reachable set piece', verb: 'pointed-at', where: 'data family (stage.ts set piece)' },
+  { prop: 'ledger folio (statement receipt book)', owner: 'the statement-family stage\u2019s left-foot furniture \u2014 the type owns the frame; the folio is the room\u2019s touchable object', verb: 'pointed-at', where: 'statement family (stage.ts set piece)' },
   // ── refusal (the sanctioned non-contact verb) ───────────────────────────
   { prop: 'dot-grid gold band (10 of 500)', owner: 'dotGrid host \u2014 crossed arms + committed gaze (1,300px from any reachable staging)', verb: 'refusal', where: 'dotGrid' },
   { prop: 'stamp plate (RECORD HIGHS)', owner: 'stampCard host \u2014 the assent nod; the plate is a top-band object no grounded host can reach', verb: 'refusal', where: 'stampCard' },
+  // ── pushed (U-02 — the sanctioned push): the hand MOVES a payload along
+  // a rail to a CONTENT docking point. A pushed prop may only touch
+  // NUMERALS, CARD EDGES or CHART POINTS — never open space. The former
+  // bare-underline push (B-01, "furniture given choreography") retires
+  // behind this sanction: every push-line call site now pushes one of
+  // these objects (a % tile, a coin stack, a ledger row).
+  { prop: 'pushed % tile (statement rail)', owner: 'the bigText count host’s near hand — the tile rides the statement rail and docks against the statement block’s lower edge (content)', verb: 'pushed', where: 'bigText' },
+  { prop: 'pushed coin stack (count rail)', owner: 'the presenting host’s near hand — the stack rides the rail and docks on the beat’s numeral chip', verb: 'pushed', where: 'count-host scenes (sanctioned variant)' },
+  { prop: 'pushed ledger row (quote foot rule)', owner: 'the quoteCard host’s near palm — the row slides the foot rule and docks at the icon stamp (card edge)', verb: 'pushed', where: 'quoteCard' },
 ];
 
-const VERBS: PropVerb[] = ['held', 'palm', 'tap', 'fist', 'bracket', 'fired-by', 'pointed-at', 'refusal'];
+const VERBS: PropVerb[] = ['held', 'palm', 'tap', 'fist', 'bracket', 'fired-by', 'pointed-at', 'refusal', 'pushed'];
 
 /** Validate the ownership registry itself (dev-time, prepare-time). */
 export function validatePropOwnership(): string[] {

@@ -3,12 +3,12 @@
  * the signature "diverging K" formation, split-number reveals, channel intro.
  */
 
-import { clamp01, easeInOutSine, easeOutCubic, easeOutQuad, hashStr, lerp, seamArrival, landPulse } from './easing';
+import { clamp01, easeInOutSine, easeOutCubic, easeOutQuad, hash01, hashStr, lerp, seamArrival, landPulse } from './easing';
 import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, glowBlob, paintBg, scenePlate, chapterFamily, chapterArch, FONT_DISPLAY, CAPTION_ZONE_TOP, TYPE_FLOOR } from './theme';
 import { bokehField, drawK3D, drawK, softBloom, kMotifs, lightRays, slideUp, subjectHalo, microShake, impactRing, depthShift } from './effects';
 import { Stickman, POSES, blendPose, walkIn, nodPulse, accentPulse, launchPulse, walkSmear, take, heroTake } from './stickman';
 import { camState } from './effects';
-import { drawStickmanV2, talkAt } from './stickman-v2';
+import { drawStickmanV2, drawHost as drawHostFig, talkAt } from './stickman-v2';
 import { HERO } from './perception';
 import { SceneCtx, declareOnScreenHeadline, beatExpressionOf } from './scene-context';
 import { pivotTakeStart, stageMoves, stageRestIdx, stageStartIdx } from './pivots';
@@ -723,6 +723,7 @@ export function hostSceneV2(g: SceneCtx): void {
       wordTimes: g.gWordTimes,
       pointBias: 'right', // AUDIT-3 / §1.5: present toward the type block
       glanceBias: 0.9,
+      rigScale: HOST_SCALE, // U-11: the accent plays at the staging rig
     });
     // AUDIT-PHASE-2 -> P0-5 (audit Table 2): the walk staging keeps the
     // certified headroom; the draw-scale change below matches.
@@ -767,7 +768,45 @@ export function hostSceneV2(g: SceneCtx): void {
     const fromX = fromIdx >= 0 ? blockX(fromIdx) : blockFor(g.prevSentenceId);
     const moveT = active ? st - active.at : st;
     const inWindow = active ? st < active.at + 950 : st < 900;
-    if (Math.abs(toX - fromX) > W * 0.015 && inWindow && Math.min(fromX, toX) >= 70) {
+    // ── U-12: ONE BODY EVENT PER HOLD (100-JUDGE VISUAL AUDIT) — every
+    // scene group of 6 s or longer carries a keyed body event at its 55%
+    // seam, matched to the content arrival: the host WALKS to the far
+    // stage block (the event the audit's B-14/B-16 verdicts demand — "a
+    // presenter who never crosses the stage", "3-6 s holds where the
+    // caption is the only update"). The machinery is the film's own:
+    // seamArrival's keyed-jitter idea, the certified BLOCKS set, and the
+    // walkIn settle. Deterministic: the seam ms and the far block both
+    // key on the sceneKey hash; scrub-safe. The walk starts FROM the
+    // block the host actually rests on and the sentence machinery's
+    // later walks start from the seam's rest — continuity is exact, no
+    // teleports.
+    const seamAt = g.d >= 6000 && reactionAt(g.s.sceneKey, t, g.d) <= 0.02
+      ? Math.round(g.d * (0.52 + 0.06 * hash01(hashStr(String(g.s.sceneKey)))) )
+      : -1;
+    const seamIdx = seamAt >= 0
+      ? Math.floor(hash01(hashStr(String(g.s.sceneKey) + '#seam')) * BLOCKS.length)
+      : -1;
+    const seamX = seamIdx >= 0 ? blockX(seamIdx) : -1;
+    const seamWalking = seamAt >= 0 && t >= seamAt && t < seamAt + 950 && !inWindow
+      && seamX > 0 && Math.abs(seamX - toX) > W * 0.02;
+    const seamRest = seamAt >= 0 && t >= seamAt + 950 && seamX > 0 ? seamX : null;
+    if (seamWalking) {
+      const arrive = Stickman.poseAt(t, {
+        gesture: (g.s.gesture ?? 'present'),
+        speaking: g.speaking,
+        sentenceId: g.sentenceId,
+        prevSentenceId: g.prevSentenceId,
+        sentenceT: g.sentenceT,
+        sentenceDurMs: g.sentenceDurMs,
+        wordTimes: g.gWordTimes,
+        pointBias: 'right',
+        rigScale: HOST_SCALE,
+      });
+      const r = walkIn(t - seamAt, Math.max(Math.min(toX, seamX), 70), seamX, 900, arrive, HOST_SCALE, 5.2);
+      hx = r.x;
+      pose = r.walking ? r.pose : arrive;
+      if (r.walking) walkPhase = r.phase;
+    } else if (Math.abs(toX - fromX) > W * 0.015 && inWindow && Math.min(fromX, toX) >= 70) {
       const arrive = Stickman.poseAt(t, {
         gesture: (g.s.gesture ?? 'present'),
         speaking: g.speaking,
@@ -777,19 +816,23 @@ export function hostSceneV2(g: SceneCtx): void {
       sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
         pointBias: 'right', // AUDIT-3 / §1.5
+        rigScale: HOST_SCALE, // U-11: the accent plays at the staging rig
       });
       // P0-5: rigScale matched to the presenting draw scale.
       // PHASE 1.1: the entry-edge clamp drops to 70 (see the entrance above) —
       // every block pair on the certified set is now walkable (all blocks sit
       // ≥ 461px, so this clamp is a floor, not a shaper).
-      const r = walkIn(moveT, Math.max(fromX, 70), toX, 900, arrive, HOST_SCALE, 5.2);
+      const r = walkIn(moveT, Math.max(seamRest ?? fromX, 70), toX, 900, arrive, HOST_SCALE, 5.2);
       hx = r.x;
       pose = r.walking
         ? r.pose
         : arrive;
       if (r.walking) walkPhase = r.phase;
     } else {
-      hx = toX;
+      // U-12: after the seam event the host RESTS on the far block (the
+      // event's arrival is a state change, not a round trip); later
+      // sentence walks start from it via the seamRest override above.
+      hx = seamRest ?? toX;
       pose = Stickman.poseAt(t, {
         gesture: (g.s.gesture ?? 'present'),
         speaking: g.speaking,
@@ -925,7 +968,12 @@ export function hostSceneV2(g: SceneCtx): void {
   // blended AFTER the take blocks so the take's own brow terms ride on
   // top during reaction windows, and the voStyle face owns the rest.
   pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)) };
-  drawStickmanV2(
+  // U-04 — ONE COSTUME LAW: the editorial host renders through the
+  // stickman-v2 drawHost wrapper (imported as drawHostFig — this file's
+  // own drawHost is the staging helper) — the same wrapper door the
+  // thumbnails use; the film costume and the packaging costume are one
+  // garment by construction.
+  drawHostFig(
     // PANEL ACCEPTANCE (audit FIX 1): ground H*0.585 → HOST_GROUND (0.62) —
     // at the 0.585 ground the 2.4× host's head topped out at 56px headroom
     // (5%); the shared 0.62 ground restores the ~9% the probe gate wants.

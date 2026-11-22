@@ -105,3 +105,7 @@ tools/stitch-dolly.mjs
 
 # 100-judge panel BEFORE/AFTER deliverables (PNGs, metrics — not repo content)
 download/before-after/
+
+# U-10 harness runtime artifacts
+evidence/
+novelty-report.json

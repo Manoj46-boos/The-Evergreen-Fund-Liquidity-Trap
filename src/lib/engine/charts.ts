@@ -1487,13 +1487,20 @@ export function wrapText(
 
 /** Source tag bottom-right of a scene — v9: 27→28px (TYPE_FLOOR). The
  *  panel measured source tags as the least-legible reading text in the
- *  film; nothing the viewer must read renders under 28px now. */
+ *  film; nothing the viewer must read renders under 28px now.
+ *  100-JUDGE VISUAL AUDIT (U-08 — FIX THE BOTTOM SANDWICH, B-09/B-21): the
+ *  citation used to run near-caption size, full-width, right-anchored,
+ *  directly under the karaoke pill — two subtitle systems fighting in the
+ *  same bottom band. The citation is now a DESIGNED PLATE: 60% of frame
+ *  width, LEFT-aligned at the film's citation row (y 1005), 34px floor
+ *  type at 55% alpha — clearly a footnote, visually divorced from the
+ *  caption pill's register. */
 export function sourceTag(
   ctx: CanvasRenderingContext2D,
   W: number,
   source: string | undefined,
-  y: number,
-  alpha = 1
+  y: number = 1005,
+  alpha = 0.55
 ): void {
   if (!source) return;
   ctx.save();
@@ -1507,25 +1514,18 @@ export function sourceTag(
   // furniture with the guard.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = alpha;
-  // VAULT NOIR fix (harness, frame 18/20/22/24): the documentary's evidence
-  // tags run long ("Source: Reuters, citing Bloomberg + investor letter ·
-  // Q1 2026 · not independently verified by Reuters" ≈ 1,900px at the 40px
-  // READ floor) — the right-anchored text ran PAST the left frame edge and
-  // shipped clipped mid-word. A footnote must always fit: shrink to fit
-  // first (40 → 30px floor — it is a glanceable source line, not body
-  // copy), then hard-truncate with an ellipsis as the last resort. The
-  // registered rect always sits inside [110, W-110].
-  // FIRST-WORD DEDUP (visual review): several script source strings already
-  // begin with "Source:"/"Sources:" — the wrapper prefixed a second one and
-  // the film shipped "Source: Source: Preqin …" on the evidence frames.
-  // The prefix is added only when the string does not carry it.
+  // the citation row — U-08's fixed y (the design grid's 1005), so every
+  // scene's footnote sits on the same designed baseline
+  const citeY = y;
   const bare = /^[Ss]ources?\b/.test(source.trim()) ? source.trim() : `Source: ${source}`;
   let txt = bare;
-  const maxW = W - 220;
-  let size = TYPE_FLOOR;
+  // U-08: the plate is 60% of the frame width, left-aligned at x 110
+  const plateX = 110;
+  const maxW = W * 0.6;
+  let size = 34; // U-08: the 34px floor type
   setFont(ctx, size, 400);
   let tw = ctx.measureText(txt).width;
-  while (tw > maxW && size > 30) {
+  while (tw > maxW && size > 26) {
     size -= 2;
     setFont(ctx, size, 400);
     tw = ctx.measureText(txt).width;
@@ -1537,14 +1537,14 @@ export function sourceTag(
     }
   }
   ctx.fillStyle = PALETTE.inkFaint;
-  ctx.textAlign = 'right';
-  ctx.fillText(txt, W - 110, y);
-  registerFixed(`sourceTag:${source.slice(0, 14)}`, W - 130 - tw, y - 26, tw + 40, 38);
+  ctx.textAlign = 'left';
+  ctx.fillText(txt, plateX, citeY);
+  registerFixed(`sourceTag:${source.slice(0, 14)}`, plateX - 10, citeY - 26, tw + 40, 38);
   // v10 (PANEL-11): the tag is READING TEXT — a scene caption landing on it
   // (gasPump, verified defect) is a text-text collision the fixed-furniture
   // check cannot see unless the caption is also registered. Register it in
   // the text set too, so any registerText'd caption is checked against it.
-  registerText(`sourceTag:${source.slice(0, 14)}`, W - 130 - tw, y - 26, tw + 40, 38, true);
+  registerText(`sourceTag:${source.slice(0, 14)}`, plateX - 10, citeY - 26, tw + 40, 38, true);
   ctx.restore();
 }
 

@@ -13,7 +13,7 @@ import { REACTIONS, reactionAt, reactionStart } from './scene-context';
 import { pivotTakeStart } from './pivots';
 import { lineChart, lineChartYBounds, pieChart, barRow, dotGrid, gauge, statCard, sourceTag, sceneTitle, wrapText } from './charts';
 import { Stickman, POSES, blendPose, accentPulse, take, walkIn } from './stickman';
-import { drawStickmanV2, talkAt } from './stickman-v2';
+import { drawStickmanV2, drawHost, talkAt } from './stickman-v2';
 import { walkStrike, walkPush } from './scenes-host';
 import { registerRect, registerText, declareHostContact } from './collision';
 // PHASE 1 (100-Judge audit Table 6): the prop ledger + the scale law are
@@ -285,7 +285,10 @@ function hostSmall(
     g.ctx.fill();
     g.ctx.restore();
   }
-  drawStickmanV2(
+  // U-04 — ONE COSTUME LAW: the side hosts render through drawHost too —
+  // the wrapper re-asserts the film costume for every host that does not
+  // pass an explicit register (the side hosts' scarf:false stays theirs).
+  drawHost(
     g.ctx, x, groundY2, scale, g.t,
     {
       // P2-4 (audit Table 4 — depth with intent): the side hosts now
@@ -498,7 +501,7 @@ export function chartTwinScene(g: SceneCtx): void {
       if (ap >= 1) sparkles(ctx, bx + chipW / 2, by + 42, t, 2600, { count: 10, radius: 220 });
     }
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
   // Fix 5.7 — THE FUSED PRESENTER. The old staging put a 0.85× crossed
   // figure ON the right card's top edge (certified in Phase 1 as the
   // crossed refusal because nothing was reachable from the perch); the
@@ -917,7 +920,7 @@ export function chartJourneyScene(g: SceneCtx): void {
     // gesture cycle's pointIn term is the declared contact verb).
     registerFigure(g.beat.scene.sceneKey, 'axis-walker', 'participant', 1.2, H, true);
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── pieChart scene wrapper ──────────────────────────────────────────────────
@@ -1026,7 +1029,7 @@ export function pieChartScene(g: SceneCtx): void {
   // 'left' — he stands left of centre but his content is further left).
   hostSmall(g, hxPie, 'pointL', 6, hyPie, 1.35, 0, 'aha', 1.4, 1, true, 0.4,
     undefined, undefined, { x: pieTouch.x, y: pieTouch.y, hand: 'palm' }, 'left');
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── dotGrid scene ────────────────────────────────────────────────────────────
@@ -1246,7 +1249,7 @@ export function magChipsScene(g: SceneCtx): void {
     hostSmall(g, 185, 'present', 22, H * 0.66, 1.2, 0, 'aha', 1.4, 1, false, 0.4,
       undefined, undefined, { x: 261, y: H * 0.50 + 60, hand: 'palm' as const }, 'right', true);
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── barsCompare scene ────────────────────────────────────────────────────────
@@ -1332,7 +1335,7 @@ export function barsCompareScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
   // v10.1 (panel 11 re-review, host-vs-content): the biggest bar's tag
   // chip ("a bigger share…", ends ≈x1598+) ran 34px under the W*0.9 side
   // host's envelope (guard-caught @528-541s). Same answer as chartTwin:
@@ -1642,7 +1645,7 @@ export function kDefScene(g: SceneCtx): void {
   // (pointR + faceDir right). Contact shadow where palm meets card.
   hostSmall(g, 900, 'pointR', 15, g.H * 0.66, 1.35, 0, 'aha', 1.4, 1, true, 0.55,
     undefined, undefined, { x: 774, y: 470, hand: 'palm' }, 'right'); // P2-4: hero moment — the naming beat rides the deep differential
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── credibilityChips ─────────────────────────────────────────────────────────
@@ -2213,7 +2216,7 @@ export function gasPumpScene(g: SceneCtx): void {
         contact: { x: 866, y: 545, hand: 'palm' },
       }, 30);
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── recessionGauge scene ─────────────────────────────────────────────────
@@ -2419,7 +2422,7 @@ export function recessionGaugeScene(g: SceneCtx): void {
     // rides the occupancy raise above (the registry must match the draw).
     registerFigure(g.beat.scene.type, 'gauge-host', 'subject', subjectRig, g.H, true);
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 // ── aiDatacenter scene (3D-ish racks) ───────────────────────────────────
@@ -2862,6 +2865,17 @@ export function aiDatacenterScene(g: SceneCtx): void {
   // Envelope y 136-312 vs nearest rack top ~548: 236px of clear air —
   // no card ever plates a rack again.
   const stats = (s.stats as any[]) || [];
+  // U-07 companion layout fix: the row was hardcoded for THREE cards
+  // (x = 180 + i*540 — a fourth card landed 446px past the frame edge and
+  // the guard sweep convicted it). The row now distributes N cards evenly
+  // across the same 180→1740 band: the certified three-card geometry is
+  // bit-identical, and longer stat rows share the band instead of
+  // overflowing it.
+  const statN = Math.max(1, stats.length);
+  const statRowW = 1740 - 180;
+  const statGap = 60;
+  const statW = statN === 3 ? 480 : Math.floor((statRowW - (statN - 1) * statGap) / statN);
+  const statStep = statN > 1 ? (statRowW - statW) / (statN - 1) : 0;
   // 100-JUDGE PANEL / Phase 4 item 4.3 — THE VALUE PLANE: this chapter
   // (ch5, the AI engine) draws 'room' — the three compact cards swap the
   // cream card for the chapter cards' own full-bleed tone slab, same
@@ -2879,7 +2893,7 @@ export function aiDatacenterScene(g: SceneCtx): void {
       // D-2 (100-judge dossier): labels now wrap to TWO rows and the plate
       // grows to fit (188px) — cards 2-3 rise to y 104 so the grown bottoms
       // (292) clear the host envelope (308) by 16px under the same camera.
-      x: 180 + i * 540, y: i === 0 ? 186 : 104, w: 480, h: 176,
+      x: Math.round(180 + i * statStep), y: i === 0 ? 186 : 104, w: statW, h: 176,
       compact: true,
       plane: valuePlane,
       bigIsNumber: false, // '¾' / '$700–730B' are strings; count-up mangles them
@@ -3220,7 +3234,7 @@ export function statCardsScene(g: SceneCtx): void {
     ctx.restore();
   });
   ctx.restore();
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
   // AUDIT-ROUND-2 (fix 4 — UN-STRAND THE HOST): the host at W*0.845 was
   // "cropped awkwardly and gestures at nothing" — the content now ends at
   // x 1330 (the hero card) and the host stands BESIDE it in his gesture
@@ -4064,7 +4078,10 @@ export function fundSplitScene(g: SceneCtx): void {
 export function oddsSpreadScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 211, 0.4, 'up'); // v10: the data room plate
-  sceneTitle(ctx, 'Recession odds — the honest range', 180, 220, clamp01(t / 600));
+  // U-07 (100-JUDGE VISUAL AUDIT — THE STRONG DRAWERS ROTATE INTO THE
+  // SCRIPT): the drawer joins the beat rotation for any range-on-a-track
+  // beat — the honest-range title becomes a prop (default preserved).
+  sceneTitle(ctx, (s.title as string) || 'Recession odds — the honest range', 180, 220, clamp01(t / 600));
   const trackY = H * 0.42;
   const trackX = 220;
   const trackW = W - 440;
@@ -4350,7 +4367,7 @@ export function oddsSpreadScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, s.source as string, H - 60);
+  sourceTag(ctx, W, s.source as string);
 }
 
 export { drawK3D, drawK, glowBlob };

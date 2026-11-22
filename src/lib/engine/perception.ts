@@ -221,8 +221,12 @@ export const INK = {
   /** Far leg taper (B1: 23.6/17.7/13 → 10.6/8.5/6.5). */
   legFar: [10.6, 8.5, 6.5] as [number, number, number],
   /** Torso taper: hips → shoulders (B1: 19/30 → 21/32 — the torso, not the
-   *  limbs, carries the figure's dark mass once the limbs are drawn ink). */
-  torso: [21, 32] as [number, number],
+   *  limbs, carries the figure's dark mass once the limbs are drawn ink).
+   *  100-JUDGE VISUAL AUDIT (U-01 — THE OWNED SILHOUETTE): 21/32 → 24/36 —
+   *  the torso mass is the silhouette's identifying mass band; the audit's
+   *  target is a host recognizable FROM SHADOW ALONE at 300px, and the
+   *  raised 24/36 taper gives the shadow its chest. The scarf sash stays. */
+  torso: [24, 36] as [number, number],
   /** Head outline stroke (was 9). AUDIT-PHASE-2: 12 -> 14 — the face's
    *  outline carries the head's identity at 320px (was 2.4px at feed,
    *  now 2.8px). */

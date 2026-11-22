@@ -315,10 +315,37 @@ export const SCRIPT: ChapterSpec[] = [
         }),
       },
       {
+        // U7 re-stage: the pro-rata rule lands on the HOST leaning into the
+        // chapter's cinematic crossing (walkAcross) — the matrix anchor run
+        // breaks and the rule gets a body (D19/D14).
+        vo: 'If requests exceed the offer, repurchases are generally pro rata.',
+        pauseAfter: 600,
+        scene: P('host', 'c3-prorate', {
+          gesture: 'pointR',
+          entrance: 'walk',
+          walkAcross: true,
+          headline: 'Requests exceed\nthe offer — pro rata.',
+          sub: 'Everyone is scaled down proportionally. Nobody is skipped.',
+        }),
+      },
+      {
+        // U7 (100-JUDGE VISUAL AUDIT — THE STRONG DRAWERS ROTATE INTO THE
+        // SCRIPT): the 5-25% offer range lands on oddsSpread — the film's
+        // range-on-a-track room draws the scheduled obligation's own
+        // band instead of a fourth wrapper-matrix card.
         vo:
           'An interval fund makes repurchase offers on a pre-committed schedule, commonly quarterly. The offer is generally between five and twenty-five percent of outstanding shares. Many funds use five percent.',
         pauseAfter: 650,
-        scene: P('wrapperMatrix', 'c3-interval', { focus: 0 }),
+        scene: P('oddsSpread', 'c3-offer-range', {
+          title: 'The interval fund’s offer range',
+          kicker: 'THE SCHEDULED OFFER',
+          markers: [
+            { at: 5, label: 'THE FLOOR — most funds set the quarterly offer here', tone: 'gold' },
+            { at: 25, label: 'THE CEILING — the rule allows up to 25% of outstanding shares', tone: 'up' },
+          ],
+          closer: 'A scheduled obligation — the offer, not the request, is capped.',
+          source: 'SEC Investor.gov — interval fund repurchase offers',
+        }),
       },
       {
         vo:
@@ -358,10 +385,17 @@ export const SCRIPT: ChapterSpec[] = [
         }),
       },
       {
+        // U7: the tender fund's board discretion lands on ownerWorker — the
+        // two-shot with fired coins draws SCHEDULE vs DISCRETION as two
+        // people on the film's shared terrain (the strongest staging the
+        // engine owns for "two different decision-makers").
         vo:
           'A tender-offer fund is different. The board determines whether to make an offer, when to make it and how large it should be. A quarterly pattern may be the expectation. It is not the same legal commitment as an interval fund\u2019s schedule.',
         pauseAfter: 650,
-        scene: P('wrapperMatrix', 'c3-tender', { focus: 1 }),
+        scene: P('ownerWorker', 'c3-tender-board', {
+          left: { title: 'THE SCHEDULE', line: 'the interval fund\u2019s committed quarterly offer — a written obligation', tone: 'up' },
+          right: { title: 'THE BOARD', line: 'the tender fund\u2019s discretion — whether, when, how large', tone: 'gold' },
+        }),
       },
       {
         // U7 re-stage: the same-ad warning becomes a pull-quote.
@@ -836,23 +870,36 @@ const CH6: ChapterSpec = {
       }),
     },
     {
+      // U7: the marking machinery lands on aiDatacenter — the rack-field
+      // room draws the valuation infrastructure (models, comps, spreads,
+      // audit) as the machine hall it is, each stat a lit plaque on a rack.
       vo:
         'A loan may be marked using discounted cash flows, comparable transactions, credit spreads and assumptions about the borrower. Independent valuation firms may contribute. An annual audit provides another layer of scrutiny. None of those features creates a live market price for every asset.',
       pauseAfter: 650,
-      scene: P('navGap', 'c6-nav', { stage: 2 }),
+      scene: P('aiDatacenter', 'c6-nav', {
+        stats: [
+          { big: 'DCF', label: 'discounted cash-flow models mark the loan', tone: 'up' },
+          { big: 'COMPS', label: 'comparable transactions bracket the price', tone: 'gold' },
+          { big: 'SPREADS', label: 'credit spreads shape the discount rate', tone: 'up' },
+          { big: 'AUDIT', label: 'the annual audit adds scrutiny — still no live price', tone: 'down' },
+        ],
+      }),
     },
     {
-      // U7 re-stage: the friction lands on the HOST (the chapter's
-      // walk-storytelling beat).
+      // U7: the central friction lands on chartJourney — the film's journey
+      // room draws the two repricing speeds the FEDS note names (public
+      // benchmarks move daily; the private mark steps quarterly).
       vo:
         'The Federal Reserve staff note identifies the central friction: private-asset valuations can adjust more slowly than public benchmarks. If investors believe NAV will fall, they may prefer to redeem before the markdown.',
       pauseAfter: 700,
-      scene: P('host', 'c6-friction', {
-        gesture: 'present',
-        entrance: 'walk',
-        walkAcross: true,
-        headline: 'Private marks move\nslower than markets.',
-        sub: 'If investors believe NAV will fall, they may prefer to redeem before the markdown.',
+      scene: P('chartJourney', 'c6-friction', {
+        title: 'Two clocks: daily prices vs the quarterly mark.',
+        series: [
+          { name: 'Public benchmark', tone: 'up', points: [[0, 100], [0.18, 101.5], [0.36, 99.5], [0.54, 102], [0.72, 100.5], [1, 103]] },
+          { name: 'Private mark (quarterly steps)', tone: 'down', points: [[0, 100], [0.25, 100], [0.5, 100], [0.75, 100], [1, 96.5]] },
+        ],
+        chips: ['the lag is the run incentive'],
+        source: 'Federal Reserve staff note (FEDS), October 2026 — valuation opacity and redemption incentives',
       }),
     },
     {
@@ -992,26 +1039,32 @@ const CH7: ChapterSpec = {
       scene: P('bullCase', 'c7-bull', { side: 'drawdown' }),
     },
     {
-      // U7 re-stage: the evergreen answer lands on the HOST.
+      // U7: "the fund manages it for you" lands on ownerWorker — the two-shot
+      // draws YOU-OPERATE vs THE-FUND-OPERATES, the beat's entire argument
+      // in one staged pair on the shared terrain.
       vo:
         'An evergreen fund can simplify that. You make an allocation. The fund manages deployment, reinvestment and portfolio rebalancing. For an investor without a large private-markets operations team, that is valuable.',
       pauseAfter: 650,
-      scene: P('host', 'c7-answer', {
-        gesture: 'present',
-        headline: 'One allocation,\nmanaged for you.',
-        sub: 'Deployment, reinvestment and rebalancing built in — valuable without an operations team.',
+      scene: P('ownerWorker', 'c7-answer', {
+        left: { title: 'YOU OPERATE', line: 'the drawdown path — unfunded commitments, reinvestment, rebalancing, all manual', tone: 'down' },
+        right: { title: 'THE FUND OPERATES', line: 'the evergreen path — one allocation, the machine does the work', tone: 'up' },
       }),
     },
     {
-      // U7 re-stage: the capital-efficiency argument becomes a stat pair.
+      // U7: the capital-efficiency argument lands on chartJourney — the
+      // exposure paths drawn as the two lines the argument IS (drawdown
+      // ramps over years; evergreen is exposed from day one).
       vo:
         'There is also a capital-efficiency argument. In a conventional commitment structure, uncalled capital may sit in lower-return assets while waiting to be deployed. An evergreen allocation can provide immediate exposure to an existing portfolio.',
       pauseAfter: 650,
-      scene: P('statCards', 'c7-capital', {
-        cards: [
-          { big: 'UNCALLED', label: 'commitment capital can sit in lower-return assets, waiting', tag: 'the drawdown drag', tone: 'down' },
-          { big: 'IMMEDIATE', label: 'an evergreen allocation is exposed from day one', tag: 'the evergreen answer', tone: 'up' },
+      scene: P('chartJourney', 'c7-capital', {
+        title: 'Exposure over time: ramp-in vs day one.',
+        series: [
+          { name: 'Drawdown fund (uncalled, then deployed)', tone: 'down', points: [[0, 0], [0.25, 0.15], [0.5, 0.4], [0.75, 0.7], [1, 1]] },
+          { name: 'Evergreen (day-one exposure)', tone: 'up', points: [[0, 1], [0.25, 1], [0.5, 1], [0.75, 1], [1, 1]] },
         ],
+        chips: ['capital parked vs capital working'],
+        source: 'Illustrative exposure paths — a structural comparison, not a return forecast',
       }),
     },
     {

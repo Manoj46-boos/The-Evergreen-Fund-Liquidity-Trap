@@ -224,6 +224,15 @@ export function bigTextScene(g: SceneCtx): void {
   // supportive underline
   // PHASE-0 round 2: the underline sits at 0.62H between line 2 (0.50H)
   // and the host (0.672H) — the three-element stack leaves no 20% gap.
+  // 100-JUDGE VISUAL AUDIT (U-02 — KILL THE EMPTY-LINE PUSH, B-01): the bare
+  // gold underline that terminated in open space was the film's default
+  // stage business — "furniture given choreography". The rule is now the
+  // RAIL a pushed object travels: a brass % TILE slides along it and stops
+  // against the statement block's edge (content), where the host's palm
+  // brackets it. Every contact verb resolves to a content element — the
+  // tile is a sanctioned 'pushed' prop in PROP_OWNERSHIP (may only touch
+  // numerals, card edges or chart points; here it docks to the statement
+  // block's lower edge).
   const up2 = clamp01((t - 1500) / 700);
   if (up2 > 0) {
     ctx.save();
@@ -235,10 +244,37 @@ export function bigTextScene(g: SceneCtx): void {
     // gesture under the words) instead of expanding from the center
     // (a loading bar). Reading direction = wipe direction.
     const w = 560 * easeOutCubic(up2);
+    const railY = H * 0.585;
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 280, H * 0.585);
-    ctx.lineTo(W / 2 - 280 + w, H * 0.585);
+    ctx.moveTo(W / 2 - 280, railY);
+    ctx.lineTo(W / 2 - 280 + w, railY);
     ctx.stroke();
+    // the PUSHED OBJECT — the % tile rides the rail's wipe edge (the
+    // gesture has a payload now), then docks at the rail's end under the
+    // statement block: line → tile → host hand, one contact chain on
+    // content. The tile carries the beat's subject (the % the statement
+    // is about) so the push READS as meaning, not decoration.
+    const tileE = clamp01((t - 1900) / 800);
+    if (tileE > 0) {
+      const tileX = W / 2 - 280 + w;
+      const dockJolt = tileE >= 1 ? Math.sin(clamp01((t - 2700) / 240) * Math.PI) * 3 : 0;
+      ctx.save();
+      ctx.translate(tileX, railY + 26 + dockJolt);
+      ctx.rotate(-0.04);
+      ctx.fillStyle = 'rgba(7,14,30,0.88)';
+      roundRect(ctx, -34, -34, 68, 68, 14);
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = rgba(PALETTE.gold, 0.9);
+      roundRect(ctx, -34, -34, 68, 68, 14);
+      ctx.stroke();
+      setFont(ctx, 44, 700, FONT_DISPLAY);
+      ctx.fillStyle = PALETTE.goldDisplay;
+      ctx.textAlign = 'center';
+      ctx.fillText('%', 0, 16 * clamp01(tileE * 1.4));
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
     ctx.restore();
   }
   // PANEL-12 / P2-3 (report §14.3): THE IMPACT FRAME — bigText lands the
@@ -311,7 +347,12 @@ export function bigTextScene(g: SceneCtx): void {
     // gesture is work; the sleeves roll. Driven inside drawStickmanV2
     // from the pose's own rHand count glyph (cuff at the forearm, on
     // the body's ivory) so every count host inherits it.
-    drawStickmanV2(ctx, 1310, H * 0.681, 1.17, t, { pose, alpha: hp, look: -0.6, parallax: true, squash, contact: { x: 1240, y: 632, hand: 'palm' } }, 31);
+    // 100-JUDGE VISUAL AUDIT (U-05 — THE IDLE PRESENCE FLOOR): 1.17 → 1.6 —
+    // the figure owns ≥ 36% of frame height in text scenes (413px of
+    // 1080). The head grows INTO the empty band above; the feet, ground
+    // and contact chain stay put, so the certified pill clearance holds.
+    // The contact resolves to the pushed % tile (U-02) — palm ON content.
+    drawStickmanV2(ctx, 1310, H * 0.681, 1.6, t, { pose, alpha: hp, look: -0.6, parallax: true, squash, contact: { x: 1240, y: 632, hand: 'palm' } }, 31);
   }
 }
 
@@ -536,7 +577,7 @@ export function stampCardScene(g: SceneCtx): void {
     // solved ground is 0.597 (feet 645, rect bottom 761, screen 782 at
     // the 1.116 lift — 14px of air over the pill). The crown stays ~86px
     // below the title band; the card row is untouched.
-    drawStickmanV2(ctx, W * 0.19, H * 0.597, 1.3, t, { pose, alpha: hp, look: 0.6, parallax: true }, 32); // PLAYBOOK D3: ground 0.667 -> 0.597 (full-figure rect clears the 2-row pill at max camera)
+    drawStickmanV2(ctx, W * 0.19, H * 0.597, 1.6, t, { pose, alpha: hp, look: 0.6, parallax: true }, 32); // PLAYBOOK D3: ground 0.667 -> 0.597 (full-figure rect clears the 2-row pill at max camera) · U-05: rig 1.3 → 1.6 (the 36% presence floor)
   }
 }
 
@@ -764,7 +805,9 @@ export function quoteCardScene(g: SceneCtx): void {
     // U3 (STANDARD MARKET VISUAL REVIEW — SCALE LAW): the walker rises
     // 1.22 → 1.5 — the quote's companion figure reads as a PERSON at the
     // feed, not a marker (the review's sub-1.2 "quoteCard walker").
-    drawStickmanV2(ctx, 1560, H * 0.645, 1.5, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
+    // 100-JUDGE VISUAL AUDIT (U-05 — THE IDLE PRESENCE FLOOR): 1.5 → 1.6 —
+    // every text-scene host owns ≥ 36% of frame height (413px).
+    drawStickmanV2(ctx, 1560, H * 0.645, 1.6, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
   }
 }
 
@@ -839,7 +882,10 @@ export function takeawaysScene(g: SceneCtx): void {
     // right edge 1574 by the guard's plating threshold) and the palm solves
     // onto that edge — the contact verb holds, the title reads.
     // U3: the takeaway host rises 1.3 → 1.5 (companion tier).
-    drawStickmanV2(ctx, 1620, H * 0.667, 1.5, t, { pose, alpha: clamp01(t / 600), look: -0.5, contact: { x: 1566, y: 480, hand: 'palm' } }, 34);
+    // 100-JUDGE VISUAL AUDIT (U-05): 1.5 → 1.6 — the idle presence floor;
+    // steps right one step (1634) so the bigger envelope clears card 3's
+    // registered right edge 1574 under the guard's plating threshold.
+    drawStickmanV2(ctx, 1634, H * 0.667, 1.6, t, { pose, alpha: clamp01(t / 600), look: -0.5, contact: { x: 1566, y: 480, hand: 'palm' } }, 34);
   } else {
     // focused card zooms; other two minimized to the left rail
     for (let i = 1; i <= 3; i++) {

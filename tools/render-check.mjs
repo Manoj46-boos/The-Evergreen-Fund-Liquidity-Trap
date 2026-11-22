@@ -814,7 +814,10 @@ if (guard && !process.argv.includes('--no-sweep')) {
   // R6 — the wrapper matrix is a drawn instrument: the frame must register
   // the focused card's plate AND its column-header texts (the ledger rows
   // are registered text inside an already-registered card).
-  p0frame(287700, 'R6', () => {
+  // U-07 note: the beat rotation moved the wrapperMatrix groups (the
+  // 5-25% offer beat now runs oddsSpread) — R6 re-anchors to the c3-tender
+  // matrix hold on the REAL TTS manifest timeline (370.9-388.8s).
+  p0frame(380000, 'R6', () => {
     const rects = guard.guardRects();
     const cards = rects.filter((r) => r.id.startsWith('card@'));
     const heads = rects.filter((r) => r.id.startsWith('colHead:'));
