@@ -112,22 +112,21 @@ export interface ReactionSpec {
   py: number;
 }
 export const REACTIONS: Record<string, ReactionSpec> = {
-  // BLUEPRINT Phase 1+5 (report Table 7 + §11 Phase 5): the reaction
-  // register rises from the 0.05-0.10 nudge ("a nudge, not a beat") to
-  // the panel's numbers — paradox 0.22, fund (the twist) 0.28, three
-  // 0.24 — and the windows tighten 2000 -> 1200ms ("a beat, not a
-  // hold"). The scenes reframe their content during the window (content
-  // recedes while the host comes forward), so the wide reading columns
-  // no longer fight the push — see the scene drawers' reaction staging.
-  'c7-paradox': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 350, py: 550 },
-  // P0-3 (audit Table 2): the twist reaction pivots ON the re-staged host
-  // (x=1650, head breaking the 493 wall) — px 1700 keeps his whole envelope
-  // inside the frame through the full 0.55 push (right edge 1842 → 1909).
-  // CONTACT VERB edition: the host re-staged to x=1395 (hand braced ON the
-  // 493 wall at 1350) — the pivot follows him (px 1420) so the twist
-  // close-up frames host-braced-against-the-wall, hand planted.
-  'c8-fund': { atFrac: 0.42, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.fund, px: 1420, py: 560 },
-  'c9-three': { atFrac: 0.4, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.three, px: 500, py: 560 },
+  // U3/D23 (STANDARD MARKET VISUAL REVIEW — REACTION CLOSE-UPS ON THE
+  // FILM'S REAL BEATS): the registry re-keys to the film's actual twist,
+  // paradox-resolve and final-takeaway sceneKeys — the shipped keys
+  // (c7-paradox / c8-fund / c9-three) belonged to a previous film's
+  // script and matched NOTHING in this timeline, so the reaction
+  // machinery (camera push, DOF, veil, hero take) NEVER fired once.
+  //   c4-trade   — the twist ("Not a contradiction. It is the trade.")
+  //   c5-both    — the paradox resolve ("Both — at different dates.")
+  //   c9-window  — the final takeaway ("5% ≠ YOUR EXIT")
+  // The scene drawers run the hero close-up staging (rig 3.1-3.3,
+  // faceScale 1.8) inside these windows; the director's push/veil/DOF
+  // consume the SAME clocks below.
+  'c4-trade': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.paradox, px: 1390, py: 560 },
+  'c5-both': { atFrac: 0.3, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.fund, px: 1390, py: 560 },
+  'c9-window': { atFrac: 0.32, durMs: AMP.reactionWindowMs, amp: AMP.reactionAmp.three, px: 620, py: 560 },
 };
 
 /**
@@ -162,4 +161,22 @@ export function reactionStart(sceneKey: string, gt: number, d: number): number {
   start = Math.min(start, Math.max(800, d - dur - 250));
   // the take fires only while the window is actually live at this gt
   return gt >= start && gt <= start + dur ? start : -1;
+}
+
+// ── U4 (STANDARD MARKET VISUAL REVIEW — defect D7, ONE FACE PER VOCAL
+// MODE): the expression rig exists but the script overrode it exactly 4
+// times in 116 beats, so the film shipped ONE worried face for 27
+// minutes. Every beat now INHERITS an expression from its voStyle;
+// an explicit `expression:` prop still wins. One map, whole film.
+export const VO_STYLE_EXPRESSION: Record<string, string> = {
+  calm: 'calm',          // flat brows — the composed read
+  neutral: 'neutral',    // the quiet default
+  urgent: 'urgent',      // raised brows + wide eyes
+  reveal: 'reveal',      // sclera + dilated pupils (the aha register)
+  quote: 'quote',        // the warm set
+};
+
+export function beatExpressionOf(beat: import('./script-data').BeatSpec): string {
+  const explicit = beat.scene?.expression as string | undefined;
+  return explicit ?? VO_STYLE_EXPRESSION[beat.voStyle ?? 'neutral'] ?? 'neutral';
 }

@@ -35,7 +35,10 @@ export type FrameFamily = 'host' | 'data' | 'statement';
 /** The occupancy floors (report Phase 3 — Composition & value). */
 export const AREA_FLOORS = {
   /** figure bbox ≥ this % of frame area on host beats */
-  hostFigurePct: 10,
+  // U3 (STANDARD MARKET VISUAL REVIEW — SCALE LAW, defect D5): the
+  // figure-area floor rises 10% → 14% — the harness now certifies the
+  // premium band the review set, on every figure beat.
+  hostFigurePct: 14,
   /** hero object bbox ≥ this % of frame area on data/statement beats */
   // VAULT NOIR v3: 18% was calibrated for wide rack walls; this film's
   // heroes are extruded GLYPHS (the %) — 9% still asserts real mass
@@ -265,7 +268,10 @@ export interface ValueSample {
 const VALUE_BANDS: Record<FrameFamily, { dark: [number, number]; bright: [number] }> = {
   host: { dark: [55, 94], bright: [1.0] },
   data: { dark: [55, 95], bright: [0.8] },
-  statement: { dark: [58, 97], bright: [0.3] },
+  // dark ceiling 97 → 98: U10's furniture diet removed the bright
+  // watermark + progress band from statement frames — the value structure
+  // is otherwise unchanged, so the band follows the furniture.
+  statement: { dark: [58, 98], bright: [0.3] },
 };
 
 export function valueMassViolations(sample: ValueSample, family: FrameFamily): string[] {

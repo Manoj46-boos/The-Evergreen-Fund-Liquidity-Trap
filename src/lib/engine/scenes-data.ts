@@ -6,7 +6,7 @@
  */
 
 import { clamp, clamp01, easeInOutCubic, easeOutBack, easeOutCubic, hash01, hashStr, lerp, seamArrival, springTo } from './easing';
-import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill } from './theme';
+import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill } from './theme';
 import { bokehField, kMotifs, lightRays, drawK, drawK3D, sparkles, hazeBands, impactRing, microShake, depthShift } from './effects';
 import { SceneCtx } from './scene-context';
 import { REACTIONS, reactionAt, reactionStart } from './scene-context';
@@ -33,7 +33,7 @@ function bg(g: SceneCtx, seed: number, gold = 0.4, plate?: 'up' | 'down' | 'gold
   paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
   // PHASE 4: the chapter family's OWNED room furniture rides the plate
   // (room architecture per chapter family, not re-tints — audit §7).
-  scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   // PLAYBOOK T2 (report §8.5 — A FLOOR FOR THE FLAT ROOMS): every data
   // room gains a 1-POINT FLOOR — 6 receding hairlines converging on a
   // horizon at 0.66H (the same grammar the datacenter's corridor uses,
@@ -189,6 +189,7 @@ function hostSmall(
     sentenceId: g.sentenceId,
     prevSentenceId: g.prevSentenceId,
     sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
     wordTimes: g.gWordTimes,
     pointBias: bias,
   };
@@ -838,6 +839,7 @@ export function chartJourneyScene(g: SceneCtx): void {
     const arriveJ = Stickman.poseAt(t, {
       gesture: 'present', speaking: g.speaking,
       sentenceId: g.sentenceId, prevSentenceId: g.prevSentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes, pointBias: 'right',
     });
     let hxJ: number; let poseJ: import('./stickman').Pose; let phaseJ: number | undefined;
@@ -1365,7 +1367,9 @@ export function barsCompareScene(g: SceneCtx): void {
   // [8.4, 159.6], a 30px gap to the label register and 8px inside the
   // frame edge. The fist-on-the-cap contact at (198, 458) stays inside
   // natural reach (no P2 root pull needed).
-  hostSmall(g, 84, 'present', 13, H * 0.66, 1.35, 0, 'aha', 1.4, 1, true, 0.4,
+  // U3 (STANDARD MARKET VISUAL REVIEW — SCALE LAW): the bar-lineage host
+  // rises 1.35 → 1.5 — the fist ON the bar cap reads at the feed.
+  hostSmall(g, 92, 'present', 13, H * 0.66, 1.5, 0, 'aha', 1.4, 1, true, 0.4,
     undefined, undefined, { x: 198, y: 458, hand: 'fist' as const }, 'right');
 }
 
@@ -2041,8 +2045,10 @@ export function gasPumpScene(g: SceneCtx): void {
     // their feet-band ids every frame (the owner's road passes beside the
     // leaning presenter — designed adjacency, the exemption is the
     // declaration).
-    const arriveO = Stickman.poseAt(t, { gesture: 'climb', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT, wordTimes: g.gWordTimes });
-    const arriveW = Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT, wordTimes: g.gWordTimes });
+    const arriveO = Stickman.poseAt(t, { gesture: 'climb', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes });
+    const arriveW = Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes });
     const walker = (
       from: number, to: number, walkAt: number, dur: number,
       roadPts: Array<[number, number]>, opts: Parameters<typeof drawStickmanV2>[5], seedN: number, flip: boolean
@@ -2181,6 +2187,7 @@ export function gasPumpScene(g: SceneCtx): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       pointBias: 'right',
     });
@@ -2359,6 +2366,7 @@ export function recessionGaugeScene(g: SceneCtx): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       pointBias: 'right',
     });
@@ -2963,6 +2971,7 @@ export function aiDatacenterScene(g: SceneCtx): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       pointBias: 'left',
     });
@@ -4245,6 +4254,7 @@ export function oddsSpreadScene(g: SceneCtx): void {
     const arriveO2 = Stickman.poseAt(t, {
       gesture: 'present', speaking: g.speaking,
       sentenceId: g.sentenceId, prevSentenceId: g.prevSentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes, pointBias: 'right',
     });
     let newest = 0;

@@ -4,11 +4,12 @@
  */
 
 import { clamp01, easeInOutSine, easeOutBack, easeOutCubic, easeOutQuad } from './easing';
-import { PALETTE, TONE, card, rgba, roundRect, setFont, paintBg, scenePlate, glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP } from './theme';
-import { bokehField, lightRays, softBloom, sparkles, drawK3D, drawPct, drawPct3D, kMotifs, floatCoins, impactRing, microShake, camState } from './effects';
-import { SceneCtx, declareOnScreenHeadline } from './scene-context';
+import { PALETTE, TONE, card, rgba, roundRect, setFont, paintBg, scenePlate, chapterArch, glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP } from './theme';
+import { bokehField, lightRays, softBloom, sparkles, drawK3D, drawPct, drawPct3D, kMotifs, floatCoins, impactRing, microShake, dustBurst, camState } from './effects';
+import { SceneCtx, declareOnScreenHeadline, reactionStart, beatExpressionOf } from './scene-context';
 import { reactionAt } from './scene-context';
-import { Stickman, POSES, blendPose, take } from './stickman';
+import { expressionPose } from './scenes-host';
+import { Stickman, POSES, blendPose, take, heroTake } from './stickman';
 import { pivotTakeStart } from './pivots';
 import { HERO } from './perception';
 import { drawStickmanV2 } from './stickman-v2';
@@ -23,7 +24,7 @@ function bg(g: SceneCtx, seed: number, gold = 0.4, strength = 0.72, bokeh = 0.85
   // PHASE-0 VISUAL AUDIT (frame evidence BEFORE_fix1-2): statement beats pass
   // furniture=false — typography-first frames get the clean stage (the
   // window/desk/shelf props read as ghost UI over the type).
-  scenePlate(g.ctx, g.W, g.H, g.chapterTone ?? 'up', strength, undefined, { furniture });
+  scenePlate(g.ctx, g.W, g.H, g.chapterTone ?? 'up', strength, undefined, { furniture, arch: chapterArch(g.chapterIdx) });
   // P2-3 (100-judge audit, Table 4 — "no bokeh on statement beats":
   // "why bubbles, in a data film?"): the bokeh level is now a per-scene
   // param. Statement beats (the stamp slam) pass 0 — typography owns the
@@ -47,7 +48,7 @@ export function bigTextScene(g: SceneCtx): void {
   // frame as a ghost UI panel top-right and a stray hairline through the
   // composition; the 0.1-alpha K-motif field added a second ghost outline.
   // A statement beat is typography + room tone — furniture OFF, kMotifs OFF.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.88, null, { furniture: false });
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.88, null, { furniture: false, arch: chapterArch(g.chapterIdx) });
   softBloom(ctx, W, H, t, 180); // v2: warm 12% bloom, not a white strobe (PATCH 5)
   // AUDIT-ROUND-3 iter-2 (Fix 4 — STATEMENT ATMOSPHERE): the re-review
   // read the statement room as "a flat gradient void with no atmosphere,
@@ -149,6 +150,14 @@ export function bigTextScene(g: SceneCtx): void {
   // 0.35 alpha (a 4%-wide smear band at 1080p). The PANEL-12 white accent
   // flashes; the smear MOVES — together they read as mass hitting the
   // frame instead of a cut.
+  // U5 (STANDARD MARKET VISUAL REVIEW — THE MOTION BUDGET): the RESTRESS —
+  // on a long read the statement re-emphasizes itself every 4s (a 900ms
+  // 2.8% scale beat about the block's centre). The slam's emphasis stays
+  // ALIVE through the hold — every 2.4s (the market cadence's own law), delivered
+  // by the statement's own grammar. Deterministic, scrub-safe.
+  const rePulse = t > 2200 && ((t - 2200) % 2400) < 900
+    ? Math.sin((((t - 2200) % 2400) / 900) * Math.PI)
+    : 0;
   const drawBlock = (dx: number, alphaMul: number): void => {
     lines.forEach((ln, i) => {
       const ap = clamp01((t - 80) / 260);
@@ -158,7 +167,7 @@ export function bigTextScene(g: SceneCtx): void {
       ctx.textAlign = 'center';
       // P3 hero register: the slam travels 0.90 → 1.0 with a 10% overshoot
       // (double the ambient arrival) — the words LAND.
-      const scale = 0.9 + HERO.blockTravel * easeOutBack(ap);
+      const scale = (0.9 + HERO.blockTravel * easeOutBack(ap)) * (1 + 0.028 * rePulse);
       // v10 (panel TYPE-2): EDITORIAL SIZE HIERARCHY — line 1 is the statement
       // in inkDeep (the display ink, 11.9:1), line 2 the punchline in goldDeep.
       // v10.1 (panel 11 re-review): the v10 step (108 → 88, a 19% ratio) still
@@ -206,6 +215,8 @@ export function bigTextScene(g: SceneCtx): void {
   // (the micro-shake was applied at the top of the scene).
   // PHASE-0 (Fix 2): ring + glow pivot to the new statement center (0.40H).
   impactRing(ctx, W / 2, H * 0.36, t, 340, 210, HERO.ringScale);
+  // U8: the slam kicks up its floor dust (first time on statement frames)
+  dustBurst(ctx, W / 2, H * 0.60, t, 340, 14, 200);
   if (t >= 340 && t < 340 + 66) {
     // the double-radius glow frame — one beat of the number's own light
     glowBlob(ctx, W / 2, H * 0.32, 640, '#9FC0E8', 0.20);
@@ -251,6 +262,28 @@ export function bigTextScene(g: SceneCtx): void {
   // entrance mid-count) and commits to the 0.85 floor / 180ms ramp — he
   // arrives after the slam at full presence instead of condensing.
   const hp = g.beatT < 2200 ? 0 : 0.85 + 0.15 * clamp01((g.beatT - 2200) / 180);
+  // ── U3/D23 (STANDARD MARKET VISUAL REVIEW — THE REACTION CLOSE-UP): the
+  // film's twist (c4-trade) and paradox-resolve (c5-both) are bigText
+  // beats — inside the reaction window the count host TAKES the frame:
+  // rig 3.2, faceScale 1.8, the hero take (coil → strike → settle), the
+  // director's camera push + DOF veil running on the SAME reactionAt
+  // clock. A 3,142-word narration finally gets an emotional register.
+  const rP = reactionAt(g.s.sceneKey, t, g.d);
+  if (rP > 0.02) {
+    const r0 = reactionStart(g.s.sceneKey, t, g.d);
+    const pose = Stickman.poseAt(t, { gesture: 'close', speaking: false, glanceBias: -0.9 });
+    const posed = r0 >= 0 ? heroTake(pose, t, r0) : pose;
+    const expr = { browRaise: 0.7, smile: 0.12, eyeL: 1.2, eyeR: 1.2 };
+    // Geometry arbiter: a full-body 3.2 rig cannot fit above the 2-row pill
+    // (the figure is 800px tall; the pill top is 796). The certified
+    // close-up is rig 2.2 + faceScale 1.8 — the FACE does the emotional
+    // work at thumbnail scale, the figure fits, the guard stays honest.
+    drawStickmanV2(ctx, 1390, H * 0.62, 2.2, t, {
+      pose: { ...posed, ...expr }, alpha: 0.85 + 0.15 * rP, look: -0.5,
+      faceScale: 1.8, parallax: true, parallaxAmt: 0.55, jaw2x: 1 + 0.4 * rP,
+    }, 31);
+    return;
+  }
   if (hp > 0) {
     const pose = Stickman.poseAt(t, { gesture: 'count2', speaking: false });
     // v3 (panel P0-3): v2 renderer — one body style across the whole film
@@ -342,7 +375,12 @@ export function stampCardScene(g: SceneCtx): void {
     ctx.globalAlpha = ap * alphaMul;
     // P3 hero register: the stamp drops from 1.55 (was 1.4) — a bigger
     // arrival travel, the slam read.
-    const scale = 1 + (1 - easeOutBack(ap)) * 0.55;
+    // U5: the RE-PRESS — every 4s the stamp re-presses 2.8% (the verdict
+    // stays live through the hold; the motion budget's own state change).
+    const rePulse = t > 2200 && ((t - 2200) % 2400) < 900
+      ? Math.sin((((t - 2200) % 2400) / 900) * Math.PI)
+      : 0;
+    const scale = (1 + (1 - easeOutBack(ap)) * 0.55) * (1 + 0.028 * rePulse);
     ctx.scale(scale, scale);
     const txt = (s.stamp as string) || 'RECORD HIGHS';
     setFont(ctx, 110, 700, FONT_DISPLAY);
@@ -385,6 +423,8 @@ export function stampCardScene(g: SceneCtx): void {
   // HERO.ringScale from the stamp's centre, the same slam grammar the
   // bigText block carries.
   impactRing(ctx, cx, cy, t, 500, 240, HERO.ringScale);
+  // U8: the stamp's dust burst — the slam has a floor
+  dustBurst(ctx, cx, cy + 150, t, 500, 14, 220);
   // checkmark + sub — VAULT NOIR: the brass check (bright mass + accent)
   const cp = clamp01((t - 700) / 700);
   if (cp > 0) {
@@ -467,7 +507,22 @@ export function stampCardScene(g: SceneCtx): void {
   }
   // host nodding
   const hp = clamp01((t - 900) / 600);
-  if (hp > 0) {
+  // ── U3/D23 (STANDARD MARKET VISUAL REVIEW — THE FINAL TAKEAWAY'S FACE):
+  // c9-window ("5% ≠ YOUR EXIT") runs the reaction window — the stamp
+  // host TAKES the frame at rig 3.1 / faceScale 1.8 while the director's
+  // push + veil close in. The verdict gets a face.
+  const rP = reactionAt(g.s.sceneKey, t, g.d);
+  if (rP > 0.02) {
+    const r0 = reactionStart(g.s.sceneKey, t, g.d);
+    const pose = Stickman.poseAt(t, { gesture: 'serious', speaking: false, glanceBias: 0.9 });
+    const posed = r0 >= 0 ? heroTake(pose, t, r0) : pose;
+    const expr = { browAngle: 10, smile: 0.02, eyeL: 1.12, eyeR: 1.12 };
+    // (same geometry arbiter as the bigText close-up: rig 2.2 + face 1.8)
+    drawStickmanV2(ctx, 620, H * 0.62, 2.2, t, {
+      pose: { ...posed, ...expr }, alpha: Math.max(hp, 0.85 + 0.15 * rP), look: 0.5,
+      faceScale: 1.8, parallax: true, parallaxAmt: 0.55,
+    }, 32);
+  } else if (hp > 0) {
     const pose = { ...POSES.close, headTilt: Math.sin(t / 700) * 4 };
     // v3 (panel P0-3): v2 renderer
     // P1-1 (report): +30% (1.0 → 1.3); ground → H*0.667 (envelope 767).
@@ -543,7 +598,9 @@ export function quoteCardScene(g: SceneCtx): void {
       setFont(ctx, 34, 700);
       ctx.fillStyle = accentDeep;
       ctx.textAlign = 'left';
-      ctx.fillText((s.kicker as string).toUpperCase(), ruleX + 64, 241);
+      // U7: the kicker defaults — a quoteCard beat without one must never crash
+      // the drawer (the director's render-error catch would blank the frame).
+      ctx.fillText(String(s.kicker ?? 'THE DATA DESK').toUpperCase(), ruleX + 64, 241);
       ctx.restore();
     }
   }
@@ -704,7 +761,10 @@ export function quoteCardScene(g: SceneCtx): void {
     // VAULT NOIR fix (sweep @628.0s): the contact host's ground 0.672 put the
     // feet band's worst-case camera bottom 18px inside the 2-row caption pill.
     // Ground 0.645 keeps the palm solve on the foot rule and clears the pill.
-    drawStickmanV2(ctx, 1560, H * 0.645, 1.22, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
+    // U3 (STANDARD MARKET VISUAL REVIEW — SCALE LAW): the walker rises
+    // 1.22 → 1.5 — the quote's companion figure reads as a PERSON at the
+    // feed, not a marker (the review's sub-1.2 "quoteCard walker").
+    drawStickmanV2(ctx, 1560, H * 0.645, 1.5, t, { pose, alpha: hp, look: -0.7, parallax: true, contact: { x: 1428, y: footY - 6, hand: 'palm' } }, 33);
   }
 }
 
@@ -778,7 +838,8 @@ export function takeawaysScene(g: SceneCtx): void {
     // host's head ON card 3's text. He steps right to 1620 (clear of card 3's
     // right edge 1574 by the guard's plating threshold) and the palm solves
     // onto that edge — the contact verb holds, the title reads.
-    drawStickmanV2(ctx, 1620, H * 0.667, 1.3, t, { pose, alpha: clamp01(t / 600), look: -0.5, contact: { x: 1566, y: 480, hand: 'palm' } }, 34);
+    // U3: the takeaway host rises 1.3 → 1.5 (companion tier).
+    drawStickmanV2(ctx, 1620, H * 0.667, 1.5, t, { pose, alpha: clamp01(t / 600), look: -0.5, contact: { x: 1566, y: 480, hand: 'palm' } }, 34);
   } else {
     // focused card zooms; other two minimized to the left rail
     for (let i = 1; i <= 3; i++) {
@@ -1102,7 +1163,10 @@ export function commentPromptScene(g: SceneCtx): void {
   // sweep is the referee.
   // PLAYBOOK D3: anchor 0.845 → 0.83 and ground 0.667 → 0.635 — the feet
   // band clears both the frame edge and the 2-row pill at max camera.
-  drawStickmanV2(ctx, W * 0.83, H * 0.635, 1.25, t, { pose, alpha: clamp01(t / 700), look: -0.5, parallax: true }, 36);
+  // U3/U4: the commentPrompt host rises 1.25 → 1.5 and inherits the
+  // beat's face (quote register).
+  const expressionPoseC = expressionPose(beatExpressionOf(g.beat));
+  drawStickmanV2(ctx, W * 0.83, H * 0.635, 1.5, t, { pose: { ...pose, ...expressionPoseC }, alpha: clamp01(t / 700), look: -0.5, parallax: true }, 36);
 }
 
 // ── endScreen v2: next-video teaser + host, YouTube-safe (PATCH 6) ──────────

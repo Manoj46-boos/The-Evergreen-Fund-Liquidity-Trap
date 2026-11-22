@@ -1515,7 +1515,12 @@ export function sourceTag(
   // first (40 → 30px floor — it is a glanceable source line, not body
   // copy), then hard-truncate with an ellipsis as the last resort. The
   // registered rect always sits inside [110, W-110].
-  let txt = `Source: ${source}`;
+  // FIRST-WORD DEDUP (visual review): several script source strings already
+  // begin with "Source:"/"Sources:" — the wrapper prefixed a second one and
+  // the film shipped "Source: Source: Preqin …" on the evidence frames.
+  // The prefix is added only when the string does not carry it.
+  const bare = /^[Ss]ources?\b/.test(source.trim()) ? source.trim() : `Source: ${source}`;
+  let txt = bare;
   const maxW = W - 220;
   let size = TYPE_FLOOR;
   setFont(ctx, size, 400);

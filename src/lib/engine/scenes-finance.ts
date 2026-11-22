@@ -16,27 +16,94 @@
 
 import { clamp01, easeOutCubic, easeOutQuad, easeInOutSine, hash01, springTo } from './easing';
 import {
-  PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, scenePlate,
+  PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, scenePlate, chapterArch,
   glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, toneRoom,
 } from './theme';
 import {
   drawPct, drawPct3D, microShake, impactRing, hazeBands, kMotifs, floatCoins,
-  sparkles, camState, depthShift,
+  sparkles, camState, depthShift, ledgerScan,
 } from './effects';
 import { SceneCtx, declareOnScreenHeadline } from './scene-context';
 import { wrapText, sourceTag } from './charts';
-import { Stickman, POSES, blendPose } from './stickman';
+import { Stickman, POSES, blendPose, walkIn } from './stickman';
 import { drawStickmanV2, talkAt } from './stickman-v2';
-import { walkStrike } from './scenes-host';
+import { walkStrike, expressionPose } from './scenes-host';
 import { registerRect, registerText, declareHostContact } from './collision';
 import { registerFigure } from './scale-law';
 import { registerHeroObject } from './composition';
+import { beatExpressionOf } from './scene-context';
 
 /** the shared room: vault background + chapter plate */
 function bg(g: SceneCtx, opts: { strength?: number; furniture?: boolean; plate?: 'up' | 'down' | 'gold' | 'neutral' } = {}): void {
   const { strength = 0.9, furniture = true, plate } = opts;
   paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
-  scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', strength, undefined, { furniture });
+  scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', strength, undefined, { furniture, arch: chapterArch(g.chapterIdx) });
+}
+
+// ── U1/U3/U7 (STANDARD MARKET VISUAL REVIEW) — THE COMPANION-HOST STAGING ──
+// One helper stages the presenter in every data scene: the U3 scale law
+// (1.6-1.9 companions), the U1 contact pass (the hand SOLVES onto the
+// scene's declared touch rect — never parks outside it), the U4 voStyle
+// face, the walk-in with walkStrike squash, and the talk/viseme wiring.
+// Every scene passes a registered rect id so the hand-vs-text guard
+// verifies the designed touch on every sweep frame.
+function financeHost(
+  g: SceneCtx,
+  hx: number, hy: number, scale: number,
+  opts: {
+    seed: number;
+    gesture?: string;
+    look?: number;
+    glanceBias?: number;
+    contact?: { x: number; y: number; w?: number; h?: number; hand?: 'palm' | 'point' | 'fist'; easeAt?: number };
+    declareId?: string;
+    walkDur?: number;
+    walkFrom?: number;
+    label?: string;
+    /** U7 refinement: full-body envelope registration (the narrow-band
+     *  staging for hosts that stand close to registered content — the
+     *  body pass then reads the TRUE silhouette, not a ±122·scale slab). */
+    hostBody?: boolean;
+  }
+): void {
+  const { ctx, t } = g;
+  let pose = Stickman.poseAt(t, {
+    gesture: opts.gesture ?? 'present',
+    speaking: g.speaking,
+    sentenceId: g.sentenceId,
+    prevSentenceId: g.prevSentenceId,
+    sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
+    wordTimes: g.gWordTimes,
+    words: g.wordTexts,
+    glanceBias: opts.glanceBias ?? 0,
+  });
+  // U4: the voStyle face — every data-scene beat inherits an expression.
+  pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)) };
+  let x = hx;
+  let walkPhase: number | undefined;
+  if (opts.walkDur) {
+    const from = Math.max(opts.walkFrom ?? 140, 140);
+    if (hx - from >= 120) {
+      const r = walkIn(t, from, hx, opts.walkDur, pose, scale, 5.2);
+      if (r) {
+        x = r.x;
+        if (r.walking) { pose = r.pose; walkPhase = r.phase; }
+      }
+    }
+  }
+  registerFigure(g.beat.scene.sceneKey ?? 'finance', opts.label ?? 'host', 'subject', scale, g.H, true);
+  drawStickmanV2(ctx, x, hy, scale, t, {
+    pose, alpha: 1, look: opts.look ?? 0, shadow: 1, nod: 0.6,
+    talk: talkAt(t, g.gWordTimes),
+    squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0,
+    walkPhase,
+    hostBody: opts.hostBody === true,
+    wordTexts: g.wordTexts, wordTimes: g.gWordTimes, beatT: g.beatT,
+    contact: opts.contact,
+    parallax: true,
+  }, opts.seed);
+  if (opts.contact && opts.declareId) declareHostContact(opts.declareId);
 }
 
 /** a glass data column heading — brass numeral ring + label */
@@ -179,6 +246,78 @@ export function statRevealScene(g: SceneCtx): void {
   const heroP = clamp01(growP);
   registerHeroObject(g.beat.scene.sceneKey ?? 'statReveal', 'pct-glyph', S * 1.9, S * 2.6, W, H);
   registerRect('statReveal:pct', gx - S * 0.9, gy - S * 1.25, S * 1.8, S * 2.5);
+  // ── U2 (STANDARD MARKET VISUAL REVIEW — defect D4, THE WELD) ────────────
+  // The two brand objects finally MEET: the host crosses the stage, plants
+  // himself beside the struck-brass % and BRACKETS it — the near fist grips
+  // the slash's lower stem (a solved contact, press shadow on), the far arm
+  // frames the ring. In the prorate beat the % SPLITS: the host pushes a
+  // 5%-wedge off the glyph and the wedge lands AT THE VIEWER with squash-
+  // on-landing + impactRing + microShake — the film's best object and its
+  // best motion grammar in one frame. D18: the first 15 seconds now carry
+  // a living anchor welded to the promise.
+  {
+    const hostRig = 1.7;                       // U3: companion rigs rise
+    const hxR = gx - 150;                      // the stage block beside the glyph
+    const hyR = H * 0.675;
+    const walkDurR = 1800;
+    // the wedge event (prorate): 5% of the disc shears off, flies at the
+    // viewer, lands with the impact grammar
+    const wedgeT0 = 2400, wedgeLand = 3300;
+    const wedgeP = mode === 'prorate' ? clamp01((t - wedgeT0) / (wedgeLand - wedgeT0)) : 0;
+    const wx = gx + S * 0.42 + wedgeP * wedgeP * 330;
+    const wy = gy - S * 0.30 + wedgeP * 250;
+    const wedgeScale = 1 + wedgeP * 0.6;
+    if (wedgeP > 0 && wedgeP < 1) {
+      // the flying wedge — an 18° brass pie slice with the porcelain edge
+      ctx.save();
+      ctx.translate(wx, wy);
+      ctx.scale(wedgeScale, wedgeScale);
+      ctx.rotate(-0.5 * wedgeP);
+      ctx.fillStyle = PALETTE.goldDisplay;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, S * 0.34, -0.35, 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.8);
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (wedgeP >= 1) {
+      // THE LANDING — squash-on-landing (U11), impact ring + micro-shake
+      const age = t - wedgeLand;
+      const squashP = age >= 0 && age < 300 ? Math.sin((age / 300) * Math.PI) : 0;
+      ctx.save();
+      ctx.translate(gx + S * 0.42 + 330, gy - S * 0.30 + 250);
+      ctx.scale(1 + 0.16 * squashP, 1 - 0.2 * squashP);
+      ctx.fillStyle = PALETTE.goldDisplay;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, S * 0.34, -0.35, 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.8);
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+      impactRing(ctx, gx + S * 0.42 + 330, gy - S * 0.30 + 250, t, wedgeLand, 130, 1.3);
+    }
+    // the host — walks in beside the glyph, then brackets the stem
+    financeHost(g, hxR, Math.min(hyR, H * 0.64), hostRig, {
+      seed: 4.2,
+      gesture: 'present',
+      glanceBias: 0.9,
+      walkDur: walkDurR,
+      walkFrom: Math.max(140, hxR - 460),
+      contact: {
+        x: gx - S * 0.14, y: gy + S * 0.42,
+        hand: 'fist', easeAt: walkDurR + 200,
+      },
+      declareId: 'statReveal:pct',
+      label: 'pct-host',
+    });
+  }
   // the floor label under the glyph
   if (mode === 'limit' || mode === 'prorate') {
     const e = easeOutCubic(clamp01((t - 2300) / 600));
@@ -272,19 +411,23 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   }
 
   // the four columns — focused one expands, others hold their one-liner
+  // U7: the row shifts right 180 → 340 — the freed left rail is the HOST's
+  // stage (he leans on the focused card's edge from his own column; the
+  // matrix never plates him and he never plates the matrix).
   const n = WRAPPERS.length;
   const gap = 34;
   const top = H * 0.285;
   const bot = CAPTION_ZONE_TOP - 40;
-  const fullW = (W - 360 - gap * (n - 1)) / n;
+  const railW = 160;
+  const fullW = (W - 360 - railW - gap * (n - 1)) / n;
   // the focused column takes 2.2× — the OTHERS shrink to fit the row
   const bigW = fullW * 1.9;
-  const othersW = (W - 360 - gap * (n - 1) - bigW) / (n - 1);
+  const othersW = (W - 360 - railW - gap * (n - 1) - bigW) / (n - 1);
   WRAPPERS.forEach((wr, i) => {
     const isFocus = mode === 'summary' ? true : i === focus;
     const cw = mode === 'summary' ? fullW : isFocus ? bigW : othersW;
     const othersBefore = mode === 'summary' ? 0 : WRAPPERS.slice(0, i).reduce((acc, _, j) => acc + (j === focus ? bigW : othersW) + gap, 0);
-    const x = 180 + othersBefore;
+    const x = 180 + railW + othersBefore;
     const p = clamp01((t - 300 - i * 260) / 650);
     if (p <= 0) return;
     ctx.save();
@@ -334,16 +477,45 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       }
     } else {
       // the dimmed / summary column — the promise only
+      // U9 (STANDARD MARKET VISUAL REVIEW — defect D21, FEED-PROOF THE
+      // MATRIX): the unfocused column alpha 0.62 → 0.85 (at 320px the old
+      // 0.62 was ~6px of gray-on-navy mush) and the body copy caps at TWO
+      // 40px lines — the rest carried by narration. The columns read at
+      // the feed as designed furniture, not as dissolving slabs.
       setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
       const lines = wrapText(ctx, isFocus && mode === 'summary' ? wr.promise.split('.')[0] + '.' : wr.promise.split('.')[0] + '.', cw - 68, 40, 400);
-      ctx.fillStyle = PALETTE.inkSoft;
-      lines.slice(0, 4).forEach((ln, li) => {
-        ctx.globalAlpha = easeOutCubic(clamp01(p * 1.4)) * (isFocus && mode === 'summary' ? 1 : 0.62);
+      ctx.fillStyle = PALETTE.ink;
+      lines.slice(0, 2).forEach((ln, li) => {
+        ctx.globalAlpha = easeOutCubic(clamp01(p * 1.4)) * (isFocus && mode === 'summary' ? 1 : 0.85);
         ctx.fillText(ln, x + 34, top + 140 + li * 50, cw - 68);
       });
       ctx.globalAlpha = 1;
     }
   });
+  // ── U7 (defect D19, THE HOST LEANS ON THE FOCUSED CARD) — the matrix's
+  // own presenter stands in the LEFT RAIL (his own column) and the near
+  // hand palms the focused card's left edge at mid-height — the card is a
+  // desk he leans on, never a slide he stands beside. The palm POINT is
+  // below the colHead text zone; the card's own register is declared as
+  // the designed contact so the lean reads clean to the guard.
+  if (mode !== 'gates') {
+    // the host leans on THE ROW's left edge (340 — always the first
+    // column's edge): focus 0 that IS the focused card; focus 1-3 he
+    // leans on the row while presenting the focused column (gaze right).
+    registerRect('wrapperMatrix:focusEdge', 332, top + 150, 26, 260);
+    financeHost(g, 268, H * 0.65, 1.6, {
+      seed: 6.1,
+      gesture: 'present',
+      glanceBias: 0.9,
+      contact: { x: 338, y: top + 240, hand: 'palm', easeAt: 0 },
+      declareId: 'wrapperMatrix:focusEdge',
+      label: 'matrix-host',
+      hostBody: true,
+    });
+    // focus 0: the leaned card IS the focused card — declare its register
+    // so the lean is a designed contact, not a body-vs-content violation.
+    if (mode === 'summary' || focus === 0) declareHostContact(`card@340,${Math.round(top)}`);
+  }
   // summary mode: the shelf line
   if (mode === 'summary') {
     const e = easeOutCubic(clamp01((t - 1800) / 700));
@@ -395,12 +567,18 @@ export function flowLiquidityScene(g: SceneCtx): void {
       ctx.globalAlpha = pipeP * (mode === 'stress' && i === 0 ? 0.25 : 0.8);
       ctx.strokeStyle = stress ? PALETTE.down : TONE(SOURCES[i].tone).main;
       ctx.lineWidth = stress ? 4 : 6;
-      ctx.setLineDash(stress ? [10, 12] : []);
+      // U8: THE CASH FLOWS — the pipes' dashes TRAVEL (deterministic
+      // lineDashOffset keyed to t): the plumbing is alive, and every
+      // flowLiquidity hold carries a structured state change (the U5
+      // motion budget's own referee eats this one too).
+      ctx.setLineDash([14, 13]);
+      ctx.lineDashOffset = stress ? -((t / 90) % 27) : -((t / 46) % 27);
       ctx.beginPath();
       ctx.moveTo(lx + lw + 10, y + (rowH - 12) / 2);
       ctx.lineTo(W * 0.72, H * 0.52);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
       ctx.restore();
     }
   });
@@ -415,12 +593,20 @@ export function flowLiquidityScene(g: SceneCtx): void {
     // VAULT NOIR fix: rows compact to h 76 — the fifth source card's
     // registered bottom (786 at the old pitch) crossed the 2-row caption
     // pill under the certified camera (sweep @524-560s).
+    // U5: each row's valve PULSES on a staggered clock (the pump is running)
+    const pulse = 1 + 0.22 * Math.sin(t / 700 - i * 1.15);
     card(ctx, lx, y, lw, rowH - 12, { r: 22, tint: stress ? TONE('down').main : undefined });
     // the valve dot
     ctx.fillStyle = stress ? PALETTE.down : TONE(src.tone).main;
     ctx.beginPath();
-    ctx.arc(lx + 40, y + (rowH - 18) / 2, 12, 0, Math.PI * 2);
+    ctx.arc(lx + 40, y + (rowH - 18) / 2, 12 * pulse, 0, Math.PI * 2);
     ctx.fill();
+    // the valve's pressure ring (the read: cash is moving through THIS row)
+    ctx.strokeStyle = rgba(stress ? PALETTE.down : TONE(src.tone).main, 0.35 * pulse);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(lx + 40, y + (rowH - 18) / 2, 17 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
     setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
     ctx.fillStyle = PALETTE.ink;
     ctx.fillText(src.k, lx + 72, y + 34, lw - 90);
@@ -454,6 +640,19 @@ export function flowLiquidityScene(g: SceneCtx): void {
   ctx.fillText('PAID', gx, gy + 36);
   ctx.textAlign = 'left';
   ctx.restore();
+  // U7/U1: the gate has an OPERATOR — the host stands at the redemption
+  // window and his palm rests ON the ring's rim (a hand on the machinery
+  // the whole chapter is about). Registered + declared for the guard.
+  registerRect('flow:gate', gx - 138, gy - 138, 276, 276);
+  financeHost(g, gx - 202, H * 0.65, 1.6, {
+    seed: 7.7,
+    gesture: 'present',
+    glanceBias: 0.9,
+    contact: { x: gx - 98, y: gy + 44, hand: 'palm', easeAt: 800 },
+    declareId: 'flow:gate',
+    label: 'gate-host',
+    hostBody: true,
+  });
   // the outflow — to the exiting investors
   ctx.save();
   ctx.globalAlpha = easeOutCubic(clamp01((t - 1100) / 700)) * (mode === 'stress' ? 0.45 : 0.9);
@@ -560,7 +759,9 @@ export function prorationDemoScene(g: SceneCtx): void {
       ctx.save();
       ctx.globalAlpha = e;
       const qx = bx + bw + 60;
-      const qw = W - qx - 150;
+      // U1: the card narrows so the operator (the host at the $50,000) has
+      // his own column — the staging never plates the reading card.
+      const qw = W - qx - 430;
       card(ctx, qx, H * 0.32, qw, 320, { r: 30 });
       setFont(ctx, 46, 700, FONT_DISPLAY);
       ctx.fillStyle = PALETTE.ink;
@@ -574,20 +775,23 @@ export function prorationDemoScene(g: SceneCtx): void {
     }
   }
 
-  // the observer — the presenter, small, at the right, watching the queue
-  const scale = 1.5;
-  const hx = W * 0.80;
+  // the operator — the presenter AT the window, hand ON the $50,000 his
+  // sentence is about (U1's flagship fix: the fingertip lands ON the
+  // number's edge — the review's "open space short of the $50,000 figure"
+  // read is dead). U3: the rig rises 1.5 → 1.7.
+  const scale = 1.7;
+  const hx = W * 0.81;
   const hy = H * 0.655;
-  const arrive = Stickman.poseAt(t, { gesture: 'think', speaking: g.speaking, sentenceId: g.sentenceId, wordTimes: g.gWordTimes, words: g.wordTexts });
-  const squash = walkStrike(g.t);
-  registerFigure(g.beat.scene.sceneKey ?? 'finance', 'host', 'subject', scale, H, true);
-  drawStickmanV2(ctx, hx, hy, scale, t, {
-    pose: blendPose(POSES.idle, arrive, 0.6),
-    alpha: 1, look: 0, shadow: 1, nod: 0.6,
-    talk: talkAt(t, g.gWordTimes),
-    squash, hostBody: false, wordTexts: g.wordTexts, wordTimes: g.gWordTimes, beatT: g.beatT,
-  }, 7);
-  declareHostContact('proration-host');
+  registerRect('proration:value50k', bx + bw + 30, H * 0.33 + 190 - 8, 320, 84, 'content');
+  registerText('proration:value50kTxt', bx + bw + 30, H * 0.33 + 190 - 8, 320, 84);
+  financeHost(g, hx, hy, scale, {
+    seed: 7,
+    gesture: 'present',
+    glanceBias: -0.9,
+    contact: { x: bx + bw + 36, y: H * 0.33 + 190 + 34, hand: 'point', easeAt: 0 },
+    declareId: 'proration:value50kTxt',
+    label: 'host',
+  });
   sourceTag(ctx, W, 'Illustration: uniform pro-rata treatment (SEC guidance) — actual procedures vary by fund', H - 56);
 }
 
@@ -657,12 +861,35 @@ export function caseFilesScene(g: SceneCtx): void {
   // VAULT NOIR fix: the card bottom rises to CAPTION_ZONE_TOP − 51 (749) —
   // at −30 (770) the registered bottom crossed the 2-row pill under the
   // certified camera (sweep @720-872s, 10-12px).
+  // U8 (STANDARD MARKET VISUAL REVIEW — THE DOSSIER): the case card OPENS
+  // — a top flap unfolds over the first 700ms (scaleY settle + a fold
+  // seam), so the beat reads as a dossier being opened, not a card
+  // fading in. U1: the card narrows and the OPERATOR opens it — the
+  // host's palm rests on the dossier's right edge while it unfolds.
   const top = H * 0.30;
   const bot = CAPTION_ZONE_TOP - 51;
+  const cardRight = W - 440;
   const e0 = easeOutCubic(clamp01((t - 350) / 650));
+  const flapP = easeOutCubic(clamp01((t - 350) / 700));
   ctx.save();
   ctx.globalAlpha = e0;
-  card(ctx, 180, top, W - 360, bot - top, { r: 34, glow: rgba(PALETTE.gold, 0.14) });
+  // the open flap — a vertical scaleX settle from the right hinge (the
+  // dossier cover swinging open toward the host)
+  ctx.save();
+  ctx.translate(cardRight, 0);
+  ctx.scale(0.55 + 0.45 * flapP, 1);
+  ctx.translate(-cardRight, 0);
+  card(ctx, 180, top, cardRight - 180, bot - top, { r: 34, glow: rgba(PALETTE.gold, 0.14) });
+  ctx.restore();
+  // the fold seam — the one line a real dossier HAS (fades as it opens)
+  if (flapP < 0.98) {
+    ctx.strokeStyle = rgba(PALETTE.ink, 0.5 * (1 - flapP));
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cardRight - 4, top + 10);
+    ctx.lineTo(cardRight - 4, bot - 10);
+    ctx.stroke();
+  }
   ctx.restore();
 
   // the fund name + structure chip
@@ -677,8 +904,11 @@ export function caseFilesScene(g: SceneCtx): void {
   // VAULT NOIR fix: rows compact (146 header + 126 pitch) and the tag chip
   // clamps to the card bottom — the old 165/140 pitch put the second stat's
   // tag chip past the card under 2-line labels.
+  // U8 (THE SLAM): each stat row's big numeral SLAMS in — microShake at
+  // the row + an impactRing from the numeral at the entry instant. The
+  // dossier's numbers HIT like stamps (the review: "the 1% chips slam in
+  // with impactRing + microShake — both exist").
   let sy = top + 146;
-  const cardRight = W - 180 - 40;
   const rowAdvance = 126;
   const chipClamp = (x: number, text: string, size: number): number => {
     const wch = chipWidth(ctx, text, { size, padX: 22 });
@@ -695,13 +925,18 @@ export function caseFilesScene(g: SceneCtx): void {
     if (!showIdx(i)) return;
     const e = easeOutCubic(clamp01((t - 700 - i * 500) / 650));
     if (e <= 0) return;
+    const landT = 700 + i * 500 + 650;
+    const shake = microShake(t, landT, 4.5);
     ctx.save();
+    ctx.translate(shake.dx, shake.dy);
     ctx.globalAlpha = e;
     // the big stat + tag
     setFont(ctx, 84, 700, FONT_DISPLAY);
     ctx.fillStyle = TONE(i === 1 && highlight === 'par' ? 'up' : c.tone).main;
     const bigW2 = Math.min(ctx.measureText(st.big).width, 280);
     ctx.fillText(st.big, 240, sy + 62);
+    // U8: the impact ring from the numeral at the landing instant
+    impactRing(ctx, 240 + bigW2 * 0.5, sy + 34, t, landT, 110, 1.1, TONE(c.tone).main);
     // the label
     setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
     const lines = wrapText(ctx, st.label, cardRight - 300 - bigW2, 40, 400);
@@ -760,6 +995,20 @@ export function caseFilesScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
+  // U1/U7: the OPERATOR opens the dossier — the host's palm rests ON the
+  // case card's right edge while the flap unfolds and the numbers slam.
+  registerRect('caseFiles:dossierEdge', cardRight - 4, top + 140, 22, 320);
+  financeHost(g, cardRight + 130, H * 0.65, 1.7, {
+    seed: 8.9,
+    gesture: 'present',
+    glanceBias: -0.9,
+    contact: { x: cardRight + 2, y: top + 250, hand: 'palm', easeAt: 800 },
+    declareId: 'caseFiles:dossierEdge',
+    label: 'dossier-host',
+    hostBody: true,
+  });
+  // U5: the auditor's line sweeps the dossier (the read is visible)
+  ledgerScan(ctx, 200, top + 20, cardRight - 200, bot - top - 40, t, 3.1);
   sourceTag(ctx, W, c.src, H - 56);
 }
 
@@ -795,40 +1044,58 @@ export function navGapScene(g: SceneCtx): void {
     // top chip row).
     const baseY = H * 0.73;
     const tw = 240;
-    const nx = W * 0.30 - tw / 2;
-    const ex = W * 0.58 - tw / 2;
+    // U8 (STANDARD MARKET VISUAL REVIEW — THE PULL): on the mechanism
+    // stages the host GRABS the economic tower and pulls the gap open —
+    // the towers separate with a squash pulse (the bars strain apart).
+    // The gap is something the figure DOES, not a dashed line he narrates
+    // at.
+    const pullP = stage >= 5 ? easeOutCubic(clamp01((t - 1400) / 900)) : 0;
+    const pullX = pullP * 46;
+    const nx = W * 0.30 - tw / 2 - pullX * 0.5;
+    const ex = W * 0.58 - tw / 2 + pullX;
     const h100 = (H * 0.34) * 1.0;
     const h90 = (H * 0.34) * 0.9;
     const e1 = easeOutCubic(clamp01((t - 400) / 800));
     const e2 = easeOutCubic(clamp01((t - 1100) / 800));
-    // the NAV tower (brass)
+    // the NAV tower (brass) — squash-pulses with the pull (U11 on the bars)
     ctx.save();
     ctx.globalAlpha = e1;
+    const sq1 = 1 - 0.07 * pullP;
     const g1 = ctx.createLinearGradient(0, baseY - h100 * e1, 0, baseY);
     g1.addColorStop(0, PALETTE.goldDisplay);
     g1.addColorStop(1, PALETTE.goldDeep);
     ctx.fillStyle = g1;
-    roundRect(ctx, nx, baseY - h100 * e1, tw, h100 * e1, 10);
+    ctx.translate(nx + tw / 2, baseY);
+    ctx.scale(sq1, 1);
+    roundRect(ctx, -tw / 2, -h100 * e1, tw, h100 * e1, 10);
     ctx.fill();
+    ctx.restore();
     setFont(ctx, 72, 700, FONT_DISPLAY);
     ctx.fillStyle = PALETTE.goldDisplay;
     ctx.textAlign = 'center';
+    ctx.globalAlpha = e1;
     ctx.fillText('NAV 100', nx + tw / 2, baseY - h100 * e1 - 26);
-    ctx.restore();
-    // the economic tower (steel)
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+    // the economic tower (steel) — the one the host PULLS
     ctx.save();
     ctx.globalAlpha = e2;
+    const sq2 = 1 - 0.06 * pullP;
     const g2 = ctx.createLinearGradient(0, baseY - h90 * e2, 0, baseY);
     g2.addColorStop(0, '#8FB4E4');
     g2.addColorStop(1, '#3A558A');
     ctx.fillStyle = g2;
-    roundRect(ctx, ex, baseY - h90 * e2, tw, h90 * e2, 10);
+    ctx.translate(ex + tw / 2, baseY);
+    ctx.scale(sq2, 1);
+    roundRect(ctx, -tw / 2, -h90 * e2, tw, h90 * e2, 10);
     ctx.fill();
+    ctx.restore();
     setFont(ctx, 72, 700, FONT_DISPLAY);
     ctx.fillStyle = '#8FB4E4';
     ctx.textAlign = 'center';
+    ctx.globalAlpha = e2;
     ctx.fillText('ECONOMIC 90', ex + tw / 2, baseY - h90 * e2 - 26);
-    ctx.restore();
+    ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
     // the gap band
     const ge = Math.min(e1, e2);
@@ -863,6 +1130,19 @@ export function navGapScene(g: SceneCtx): void {
       });
       ctx.restore();
     }
+    // U8: the PULL — the host between the towers, fist ON the economic
+    // tower's left edge (the contact rect rides the pulled tower).
+    // Registered + declared for the guard.
+    registerRect('navGap:econ', ex - 4, baseY - h90, 26, h90);
+    financeHost(g, ex - 120, H * 0.65, 1.6, {
+      seed: 9.4,
+      gesture: 'present',
+      glanceBias: 0.9,
+      contact: { x: ex + 4, y: baseY - h90 * 0.45, hand: 'fist', easeAt: 1200 },
+      declareId: 'navGap:econ',
+      label: 'pull-host',
+      hostBody: true,
+    });
   } else {
     // ── the governance / methodology stages ──
     const rows = [
@@ -883,17 +1163,34 @@ export function navGapScene(g: SceneCtx): void {
       if (e <= 0) return;
       ctx.save();
       ctx.globalAlpha = e;
-      card(ctx, 240, ry, W - 700, 128, { r: 30, tint: TONE(r.tone).main });
+      card(ctx, 240, ry, W - 900, 128, { r: 30, tint: TONE(r.tone).main }); // U7: narrowed — the marks-host leans from his own column
       setFont(ctx, 46, 700, FONT_DISPLAY);
       ctx.fillStyle = TONE(r.tone).main;
       ctx.fillText(r.k.toUpperCase(), 300, ry + 48, W - 820);
       setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
-      const lines = wrapText(ctx, r.v, W - 880, 34, 400);
+      const lines = wrapText(ctx, r.v, W - 1080, 34, 400);
       ctx.fillStyle = PALETTE.inkSoft;
       lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, 300, ry + 84 + li * 36));
       ctx.restore();
       ry += 140;
     });
+    // U7/U1: the operator — the host's palm rests on the visible row's
+    // right edge (the cards are a desk of marks he reviews, not slides).
+    {
+      const rowRight = 240 + (W - 900);
+      const lastRow = Math.min(stage, 2);
+      const rowY = H * 0.30 + lastRow * 140;
+      registerRect('navGap:rowEdge', rowRight - 4, rowY, 22, 128);
+      financeHost(g, rowRight + 150, H * 0.65, 1.6, {
+        seed: 9.6,
+        gesture: 'present',
+        glanceBias: -0.9,
+        contact: { x: rowRight + 4, y: rowY + 64, hand: 'palm', easeAt: 700 },
+        declareId: 'navGap:rowEdge',
+        label: 'marks-host',
+        hostBody: true,
+      });
+    }
     if (stage === 0) {
       const e = easeOutCubic(clamp01((t - 1000) / 600));
       if (e > 0) {
@@ -908,6 +1205,11 @@ export function navGapScene(g: SceneCtx): void {
         ctx.restore();
       }
     }
+  }
+  // U5: the auditor's line sweeps the mechanism (the hypothetical towers)
+  if (hypothetical) {
+    const baseY2 = H * 0.73;
+    ledgerScan(ctx, W * 0.16, baseY2 - H * 0.36, W * 0.62, H * 0.36, t, 9.9);
   }
   sourceTag(ctx, W, 'SEC fair-value requirements · Federal Reserve FEDS note (Oct 2026) — valuation opacity and redemption incentives', H - 56);
 }
@@ -1005,6 +1307,20 @@ export function feeStackScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
+  // U7/U1: the fee stack has a TELLER — the host leans at the stack's left
+  // end, fist ON the top plate's edge (the layers are plates he deals, not
+  // a list he reads). Registered + declared for the guard.
+  registerRect('feeStack:plateEdge', 240, H * 0.305, 70, 84);
+  financeHost(g, 170, H * 0.62, 1.6, {
+    seed: 10.3,
+    gesture: 'present',
+    glanceBias: 0.9,
+    contact: { x: 248, y: H * 0.305 + 42, hand: 'fist', easeAt: 600 },
+    declareId: 'feeStack:plateEdge',
+    label: 'fees-host',
+  });
+  // U5: the auditor's line sweeps the fee stack
+  ledgerScan(ctx, 244, H * 0.305, lw - 20, 5 * 92, t, 10.3);
   sourceTag(ctx, W, 'BCRED published offering terms (Class S example) · recheck current terms before any allocation decision', H - 56);
 }
 
@@ -1096,19 +1412,21 @@ export function bullCaseScene(g: SceneCtx): void {
     }
   }
 
-  // the host — presenting, right side (ground H*0.63: the feet band's
-  // worst-case camera bottom clears the 2-row pill)
-  const scale = 1.45;
-  const hx = W * 0.815;
-  const hy = H * 0.63;
-  const arrive = Stickman.poseAt(t, { gesture: side === 'cost' || side === 'mismatch' ? 'wry' : 'present', speaking: g.speaking, sentenceId: g.sentenceId, wordTimes: g.gWordTimes, words: g.wordTexts });
-  registerFigure(g.beat.scene.sceneKey ?? 'finance', 'host', 'subject', scale, H, true);
-  drawStickmanV2(ctx, hx, hy, scale, t, {
-    pose: arrive, alpha: 1, look: 0, shadow: 1, nod: 0.6,
-    talk: talkAt(t, g.gWordTimes),
-    squash: walkStrike(g.t), hostBody: false, wordTexts: g.wordTexts, wordTimes: g.gWordTimes, beatT: g.beatT,
-  }, 9);
-  declareHostContact('bullcase-host');
+  // U1/U3: the panel has a SPEAKER — the host's palm rests ON the ledger
+  // card's right edge while the rows land (a hand on the argument he is
+  // making). Rig rises 1.45 → 1.7.
+  registerRect('bullCase:panelEdge', W - 580, top + 140, 22, 300);
+  financeHost(g, W * 0.78, H * 0.65, 1.7, {
+    seed: 11.1,
+    gesture: side === 'cost' || side === 'mismatch' ? 'pointR' : 'present',
+    glanceBias: -0.9,
+    contact: { x: W - 580, y: top + 250, hand: 'palm', easeAt: 700 },
+    declareId: 'bullCase:panelEdge',
+    label: 'bull-host',
+    hostBody: true,
+  });
+  // U5: the auditor's line sweeps the argument panel
+  ledgerScan(ctx, 244, top + 20, W - 820 - 20, CAPTION_ZONE_TOP - 74 - top - 40, t, 11.1);
   sourceTag(ctx, W, side === 'cost' ? 'Source: Hamilton Lane 2026 overview — sample small and selected, comparison not like-for-like' : 'Analysis — suitability depends on the match between terms and obligations', H - 56);
 }
 
@@ -1142,24 +1460,60 @@ export function auditChecklistScene(g: SceneCtx): void {
     // the chip rises to H*0.625 — the old layout put the second card row's
     // bottom at 830 and the chip at 756, both inside the 2-row caption
     // pill band (the sweep flagged card@180,610 + chip @1553-1556s).
+    // U8 (STANDARD MARKET VISUAL REVIEW — THE DEAL): the chips DEAL onto a
+    // desk edge one by one — each card slides from the deck (the left
+    // margin shelf) into its slot with a rotation settle and its own
+    // contact shadow. A hand deals them; the grid assembles like a
+    // spreadsheet being dealt, not eight cards fading in.
     const cols = 4, rows = 2;
     const cw = (W - 360 - (cols - 1) * 36) / cols;
     const ch = 160;
+    const deckX = 60, deckY = H * 0.86;
     AUDIT_QS.forEach((qa, i) => {
-      const cx = 180 + (i % cols) * (cw + 36);
-      const cy = H * 0.285 + Math.floor(i / cols) * (ch + 20);
-      const e = easeOutCubic(clamp01((t - 300 - i * 160) / 550));
-      if (e <= 0) return;
+      const cx0 = 180 + (i % cols) * (cw + 36);
+      const cy0 = H * 0.285 + Math.floor(i / cols) * (ch + 20);
+      const dp = easeOutCubic(clamp01((t - 300 - i * 220) / 480));
+      if (dp <= 0) return;
+      const dxs = deckX + (cx0 - deckX) * dp;
+      const dys = deckY + (cy0 - deckY) * dp;
       ctx.save();
-      ctx.globalAlpha = e;
-      card(ctx, cx, cy, cw, ch, { r: 26, glow: rgba(PALETTE.gold, 0.16) });
-      setFont(ctx, 26, 700);
-      ctx.fillStyle = PALETTE.goldInk;
-      ctx.textAlign = 'center';
-      ctx.fillText(String(i + 1).padStart(2, '0'), cx + cw / 2, cy + 40);
-      setFont(ctx, Math.min(48, cw / 4.4), 700, FONT_DISPLAY);
-      ctx.fillStyle = PALETTE.ink;
-      ctx.fillText(qa.w, cx + cw / 2, cy + ch / 2 + 26, cw - 40);
+      ctx.globalAlpha = Math.min(1, dp * 1.6);
+      if (dp >= 1) {
+        // U7 guard truth: the LANDED card draws at its TRUE slot with card()
+        // (the guard reads real rectangles — never card@0,0 under a
+        // transform).
+        card(ctx, cx0, cy0, cw, ch, { r: 26, glow: rgba(PALETTE.gold, 0.16) });
+        setFont(ctx, 26, 700);
+        ctx.fillStyle = PALETTE.goldInk;
+        ctx.textAlign = 'center';
+        ctx.fillText(String(i + 1).padStart(2, '0'), cx0 + cw / 2, cy0 + 40);
+        setFont(ctx, Math.min(48, cw / 4.4), 700, FONT_DISPLAY);
+        ctx.fillStyle = PALETTE.ink;
+        ctx.fillText(qa.w, cx0 + cw / 2, cy0 + ch / 2 + 26, cw - 40);
+      } else {
+        // the DEALING card: a bare slab mid-flight (transient, unregistered),
+        // rotating flat from the dealt tilt with its contact shadow
+        ctx.translate(dxs + cw / 2, dys + ch / 2);
+        ctx.rotate((1 - dp) * 0.14);
+        ctx.fillStyle = rgba(PALETTE.shadow, 0.3);
+        ctx.beginPath();
+        ctx.ellipse(6, ch / 2 + 14, cw * 0.46, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = rgba(PALETTE.card, 0.9);
+        roundRect(ctx, -cw / 2, -ch / 2, cw, ch, 26);
+        ctx.fill();
+        ctx.strokeStyle = rgba(PALETTE.cardBorder, 0.7);
+        ctx.lineWidth = 2;
+        roundRect(ctx, -cw / 2, -ch / 2, cw, ch, 26);
+        ctx.stroke();
+        setFont(ctx, 26, 700);
+        ctx.fillStyle = PALETTE.goldInk;
+        ctx.textAlign = 'center';
+        ctx.fillText(String(i + 1).padStart(2, '0'), 0, -ch / 2 + 40);
+        setFont(ctx, Math.min(48, cw / 4.4), 700, FONT_DISPLAY);
+        ctx.fillStyle = PALETTE.ink;
+        ctx.fillText(qa.w, 0, 26, cw - 40);
+      }
       ctx.restore();
     });
     ctx.textAlign = 'left';
@@ -1205,7 +1559,9 @@ export function auditChecklistScene(g: SceneCtx): void {
   if (q >= 0 && q < 8) {
     const qa = AUDIT_QS[q];
     const qx = railX + railW + 70;
-    const qw = W - qx - 180;
+    // U7: the card narrows to give the examiner his column (the host
+    // leans on its right edge — never plates the question text).
+    const qw = W - qx - 340;
     const cardBot = CAPTION_ZONE_TOP - 90;
     const e0 = easeOutCubic(clamp01((t - 350) / 600));
     ctx.save();
@@ -1224,6 +1580,29 @@ export function auditChecklistScene(g: SceneCtx): void {
     const lines = wrapText(ctx, qa.sub, qw - 96, 40, 400);
     ctx.fillStyle = PALETTE.inkSoft;
     lines.slice(0, Math.max(0, Math.floor((cardBot - 14 - subY) / 52))).forEach((ln, li) => ctx.fillText(ln, qx + 48, subY + li * 52));
+    // U7/U1: the audit has an EXAMINER — the host leans on the question
+    // card's right edge (a hand on the question he is asking). Registered
+    // + declared for the guard.
+    registerRect('audit:qCardEdge', qx + qw - 4, H * 0.30 + 120, 22, 300);
+    financeHost(g, qx + qw + 40, H * 0.65, 1.6, {
+      seed: 13.7,
+      gesture: 'present',
+      glanceBias: -0.9,
+      contact: { x: qx + qw + 2, y: H * 0.30 + 170, hand: 'palm', easeAt: 0 },
+      declareId: 'audit:qCardEdge',
+      label: 'audit-host',
+      hostBody: true,
+    });
+    // the examiner LEANS on the question card — its register joins the
+    // designed-contact set so the lean reads clean to the body pass.
+    declareHostContact(`card@${qx},${Math.round(H * 0.30)}`);
+  }
+  // U5: the auditor's line sweeps the audit document
+  if (mode === 'words') {
+    ledgerScan(ctx, 180, H * 0.285, W - 360, 2 * 160 + 20, t, 13.9);
+  } else if (q >= 0 && q < 8) {
+    const qxS = 180 + 330 + 70, qwS = W - qxS - 340;
+    ledgerScan(ctx, qxS, H * 0.30, qwS, CAPTION_ZONE_TOP - 90 - H * 0.30, t, 13.9);
   }
   sourceTag(ctx, W, 'The author\u2019s synthesis — components grounded in the SEC, Federal Reserve, fund-document and valuation sources in this film', H - 56);
 }
@@ -1337,17 +1716,17 @@ export function systemMapScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  // the host — closing the film at the right (ground H*0.63: the feet
-  // band's worst-case camera bottom clears the 2-row pill)
-  const scale = 1.5;
-  const hx = W * 0.815;
-  const hy = H * 0.63;
-  const arrive = Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, wordTimes: g.gWordTimes, words: g.wordTexts });
-  registerFigure(g.beat.scene.sceneKey ?? 'finance', 'host', 'subject', scale, H, true);
-  drawStickmanV2(ctx, hx, hy, scale, t, {
-    pose: arrive, alpha: 1, look: 0, shadow: 1, nod: 0.6,
-    talk: talkAt(t, g.gWordTimes),
-    squash: walkStrike(g.t), hostBody: false, wordTexts: g.wordTexts, wordTimes: g.gWordTimes, beatT: g.beatT,
-  }, 11);
-  declareHostContact('systemmap-host');
+  // the host — closing the film AT the system: the operator's palm rests
+  // ON the MANAGER disc's rim (U1's flagship — the finger touches the
+  // MANAGER node the review named). Rig rises 1.5 → 1.7; the host steps
+  // in beside the ring instead of watching from the far margin.
+  registerRect('systemMap:manager', cx - 90, cy - 90, 180, 180);
+  financeHost(g, cx + R + 60, H * 0.64, 1.7, {
+    seed: 12.4,
+    gesture: 'present',
+    glanceBias: -0.9,
+    contact: { x: cx + 84, y: cy - 24, hand: 'point', easeAt: 900 },
+    declareId: 'systemMap:manager',
+    label: 'system-host',
+  });
 }

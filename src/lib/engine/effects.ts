@@ -1552,6 +1552,67 @@ export function floatCoins(
  * 100-JUDGE DOSSIER (P3 — hero register): optional `amp` override — the
  * hero slams pass HERO.shakePx (2.3× ambient). Default stays ambient.
  */
+// U5 (STANDARD MARKET VISUAL REVIEW — THE MOTION BUDGET): THE AUDITOR'S
+// LINE — a gold hairline with a soft trail that sweeps the active document
+// every `period` ms (deterministic, pure function of t). The film's own
+// brand motif (this is a film about audits): the document under narration
+// is being READ, and the read is VISIBLE. Every hold in a document scene
+// carries a structured state change — the scan crosses ~2.5% of the frame
+// per boundary — while reading as design, not as noise.
+export function ledgerScan(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  t: number, seed = 0, period = 2600
+): void {
+  const ph = ((t + seed * 700) % period) / period;
+  const sy = y + h * ph;
+  ctx.save();
+  // the trail above the line — the read's wake
+  const tr = ctx.createLinearGradient(0, sy - 34, 0, sy);
+  tr.addColorStop(0, rgba(PALETTE.gold, 0));
+  tr.addColorStop(1, rgba(PALETTE.gold, 0.16));
+  ctx.fillStyle = tr;
+  ctx.fillRect(x, Math.max(y, sy - 34), w, Math.min(34, sy - y));
+  // the line itself
+  ctx.strokeStyle = rgba(PALETTE.goldDisplay, 0.5);
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(x, sy);
+  ctx.lineTo(x + w, sy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// U8 (STANDARD MARKET VISUAL REVIEW — THE DUST EMITTER): the slam's floor
+// dust — one brass mote burst kicked up where the statement/stamp lands.
+// Deterministic (hash-keyed, pure function of t), ~700ms life, whisper
+// alpha: the impact grammar gains a GROUND the frame can feel.
+export function dustBurst(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number,
+  t: number, t0: number,
+  count = 12, spread = 170
+): void {
+  const age = t - t0;
+  if (age < 0 || age > 700) return;
+  const life = age / 700;
+  ctx.save();
+  for (let i = 0; i < count; i++) {
+    const h1 = hash01(i * 13.7 + 0.5), h2 = hash01(i * 29.3 + 5.5), h3 = hash01(i * 7.7 + 2.2);
+    const dir = (h1 - 0.5) * 2;
+    const dist = spread * (0.3 + 0.7 * h2) * easeOutCubic(life);
+    const x = cx + dir * dist;
+    const y = cy + (0.25 + 0.5 * h3) * dist * 0.4 - life * 26 * h1;
+    const r = 2.5 + 4.5 * h3 * (1 - life);
+    ctx.globalAlpha = 0.38 * (1 - life) * (0.4 + 0.6 * h2);
+    ctx.fillStyle = rgba(PALETTE.gold, 0.85);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 export function microShake(t: number, t0: number, amp?: number): { dx: number; dy: number } {
   const age = t - t0;
   if (age < 0 || age > 60) return { dx: 0, dy: 0 };

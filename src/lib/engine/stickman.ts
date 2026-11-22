@@ -346,6 +346,15 @@ export class Stickman {
      *  re-verification verdict). Deterministic: the list is still keyed by
      *  the sentence-id hash. */
     pointBias?: 'left' | 'right';
+    /** U12 (idle vocabulary, defect D15): horizontal direction (-1..1) of
+     *  the data the figure just presented — the idle GLANCE state turns the
+     *  head toward it instead of a seed-picked side. Scenes that know where
+     *  their hero object sits pass the bias; default falls back to seed. */
+    glanceBias?: number;
+    /** U5 (motion-budget, defect D13): the active sentence's duration (ms) —
+     *  the MID-SENTENCE GESTURE SWAP fires at ~55% of it, so a long sentence
+     *  carries TWO gesture states, not one parked pose. */
+    sentenceDurMs?: number;
   }): Pose {
     const seed = opts.seed ?? 0;
     const gesture = opts.gesture || 'idle';
@@ -390,6 +399,28 @@ export class Stickman {
           POSES[list[Math.min(list.length - 1, Math.floor(hashStr(id) * list.length))]];
         const cyc = pick(opts.sentenceId);
         const prevPose = pick(opts.prevSentenceId ?? opts.sentenceId);
+        // U5 (STANDARD MARKET VISUAL REVIEW — defect D13, THE MOTION BUDGET):
+        // ONE SENTENCE, TWO GESTURES. At ~55% of the sentence's measured
+        // duration the presenting cycle swaps to a SECOND hash-picked pose
+        // (never the same one) on the house spring — the meaningful state
+        // change every 1.5-2.5s the retention cadence prescribes, delivered
+        // by the gesture grammar itself. Deterministic: the second pose keys
+        // on the sentence id + '#2'; scrub-safe.
+        const durMs = opts.sentenceDurMs ?? 4200;
+        const swapAt = Math.max(2200, durMs * 0.55);
+        const stNow = opts.sentenceT ?? 1e9;
+        let cycTarget = cyc;
+        if (stNow > swapAt) {
+          let idx2 = Math.floor(hashStr(String(opts.sentenceId) + '#2') * list.length) % list.length;
+          const heldIdx = list.indexOf(list[Math.min(list.length - 1, Math.floor(hashStr(String(opts.sentenceId)) * list.length))]);
+          let guardN = 0;
+          while (list[idx2] === list[heldIdx] && guardN < list.length) {
+            idx2 = (idx2 + 1) % list.length;
+            guardN++;
+          }
+          const kSwap = clamp01(springTo(0, 1, stNow - swapAt, 480, 11));
+          cycTarget = blendPose(cyc, POSES[list[idx2]], kSwap);
+        }
         // AUDIT-2 / 1.6 (report §10.2, M1/M2 + §10.3): ARCS, CASCADE and
         // ANTICIPATION on every sentence gesture —
         //  • ANTICIPATION: the first 150ms blends the pose 30% AWAY from
@@ -443,8 +474,8 @@ export class Stickman {
         // shoulder — a wave that visibly travels DOWN the limb at phone
         // scale (70ms downsampled to a snap at 320px).
         const fLo = Math.max(0, springTo(0, 1, Math.max(0, sT - 90), 150, 10.5) - anti * 0.7);
-        const up = blendPose(prevPose, cyc, fUp);
-        const lo = blendPose(prevPose, cyc, fLo);
+        const up = blendPose(prevPose, cycTarget, fUp);
+        const lo = blendPose(prevPose, cycTarget, fLo);
         pose = { ...up, lAL: lo.lAL, rAL: lo.rAL };
         // PHASE 2 VISUAL AUDIT (Fix 1 — GESTURE ARCS): the angle-lerp above
         // carries the hand in a STRAIGHT line between poses. The motion
@@ -617,13 +648,51 @@ export class Stickman {
     } else if (opts.speaking && gesture === 'think') {
       pose = POSES.think;
     } else if (!opts.speaking) {
-      // P1 U6 (KILL THE MANNEQUIN DEFAULT): between sentences the figure
-      // settles into the ASYMMETRIC idle stance — weight leg, bent near
-      // elbow, committing head — instead of holding the beat's gesture
-      // pose forever. The pose keys existed; the blend path above never
-      // reached them. The blend block above smooths the transition, so
-      // the settle reads as a pose change, not a snap.
-      pose = POSES.idle;
+      // U12 (STANDARD MARKET VISUAL REVIEW — defect D15, THE MANNEQUIN
+      // DEFAULT): sentence gaps no longer park the figure in POSES.idle
+      // forever. A FOUR-STATE IDLE LOOP keyed to t (every state ~2.4s,
+      // pure function of t — scrub-safe like everything else):
+      //   0 SETTLE   — the asymmetric idle stance (the shipped park);
+      //   1 WEIGHT SHIFT — the hips settle onto the other leg (a ±9°
+      //     pelvis tilt flip with a 2px root drop — weight you can SEE);
+      //   2 GLANCE AT THE DATA — the head yaws toward the last presented
+      //     object (the glance-back a real presenter gives the chart);
+      //   3 FOOT SHIFT + RE-ANCHOR — one foot slides a half-step with a
+      //     2px root drop and the near arm re-sets (a small posture
+      //     adjustment that reads as "ready for the next sentence").
+      // The states blend with the house spring so no state snaps.
+      {
+        const CYCLE = 2400;
+        const state = Math.floor(t / CYCLE) % 4;
+        const phT = (t % CYCLE) / CYCLE;
+        const easeS = clamp01(springTo(0, 1, phT * CYCLE, 420, 12));
+        const settle = POSES.idle;
+        // state 1 — weight onto the other leg: pelvis/shoulder counter-flip
+        const shifted: Pose = {
+          ...settle,
+          pelvisTilt: -settle.pelvisTilt * 1.15,
+          shoulderTilt: -(settle.shoulderTilt ?? 0) * 1.15,
+          rootY: settle.rootY + 3,
+          lLU: settle.rLU * 0.9, lLL: settle.rLL * 0.9,
+          rLU: settle.lLU * 0.9, rLL: settle.lLL * 0.9,
+          lean: settle.lean * -1.1,
+        };
+        // state 2 — the glance at the data just presented (head only; the
+        // body keeps the settle stance — a glance is a HEAD verb)
+        const glanceDir = (opts.glanceBias ?? 0) || (seed % 2 === 0 ? 0.8 : -0.8);
+        const glanced: Pose = { ...settle, headYaw: glanceDir * (AMP.headYawDeg ?? 14) * 0.92, headTilt: settle.headTilt + 2 };
+        // state 3 — foot shift + re-anchor: one foot a half-step out, the
+        // near arm re-sets on the hip line (the pre-sentence posture)
+        const reanchored: Pose = {
+          ...settle,
+          rLU: settle.rLU + 13, rLL: settle.rLL - 9,
+          rootY: settle.rootY + 3,
+          rAU: settle.rAU + 12, rAL: settle.rAL - 34,
+          lAL: settle.lAL + 14,
+        };
+        const target = state === 1 ? shifted : state === 2 ? glanced : state === 3 ? reanchored : settle;
+        pose = blendPose(settle, target, easeS);
+      }
     } else {
       pose = POSES[gesture] ?? POSES.idle;
     }

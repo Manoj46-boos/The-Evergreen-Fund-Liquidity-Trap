@@ -1807,6 +1807,7 @@ export function drawStickmanV2(
   if ((r.shadow ?? 1) > 0 && drawFar) groundShadowV2(ctx, 0, 0, 1, r.shadowSkew ?? 0, r.shadowRot ?? 0);
 
   const ink = PALETTE.ink;
+  const farInk = ink;
   // AUDIT-ROUND-3 (Fix 1 — ONE INK): the two-tone split (#3A4A45 far vs
   // #1F3328 near, at different widths) was read by two independent
   // judges as a rigging error — "the legs are two different widths with
@@ -1816,7 +1817,6 @@ export function drawStickmanV2(
   // (the INK register's far/near taper difference) plus overlap and the
   // knuckle joints — ONE silhouette value per character, the Alan
   // Becker rule the panel set as the reference standard.
-  const farInk = ink;
   // AUDIT-3 / Walk 3.0 (§2.6): the shoe PITCHES with the stride (lToe/rToe
   // from walkPose) — heel-strike (toe up) through toe-off (toe down).
   // BLUEPRINT Phase 2 (report §11): the 18x8.5 ELLIPSE becomes a DRAWN
@@ -1873,6 +1873,17 @@ export function drawStickmanV2(
   // with an ivory brim-edge line so the cap reads as a DIFFERENT
   // silhouette at 320px — the ownerWorker pair becomes cast, not copies.
   const worker = r.variant === 'worker';
+  // U6 (STANDARD MARKET VISUAL REVIEW — defect D8, THE SUIT REACHES THE
+  // LEGS): the OUTFIT.trouser ink now RUNS DOWN THE LEGS. The host's
+  // legs draw in the tailored trouser navy (the drawnBone cylinder
+  // gradient gives each leg its lit edge, so the navy reads as cloth
+  // under the key light, never as a void); the far leg takes the same
+  // trouser ink one register darker (the atmospheric step). The cast
+  // variants (prof / worker) keep their own wardrobes — the trouser is
+  // the HOST's garment. The cream "white tights under a navy jacket"
+  // read is dead at every rig.
+  const trouser = prof || worker ? ink : OUTFIT.trouser;
+  const trouserFar = prof || worker ? farInk : hexLerp(OUTFIT.trouser, '#050912', 0.24);
   if (drawFar) {
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1880,7 +1891,7 @@ export function drawStickmanV2(
     // DARK MASS on pale ground — limb weights rise so the figure carries
     // the frame's identity at 320px (far leg 12/10/9 -> 17/13/10, far arm
     // 9/8/7 -> 13/10/8).
-    farFoot = limb2(ctx, hipLX, hipLY, pose.lLU, pose.lLL, U_LEG, L_LEG, INK.legFar[0], INK.legFar[1], INK.legFar[2], farInk, pose.lLift ?? 0, 1.14); // iter-3: knee mass
+    farFoot = limb2(ctx, hipLX, hipLY, pose.lLU, pose.lLL, U_LEG, L_LEG, INK.legFar[0], INK.legFar[1], INK.legFar[2], trouserFar, pose.lLift ?? 0, 1.14); // iter-3: knee mass · U6 trouser ink
     if (farFoot) bbTouch(farFoot.ex, farFoot.ey, 24); // PHASE 3 bbox: far shoe
     // 100-JUDGE AUDIT (Part 9.3 — COUNTER-ARM SECONDARY MOTION). When the
     // near arm gestures (smear > 0), the far arm should counter-balance —
@@ -1913,8 +1924,9 @@ export function drawStickmanV2(
     }
       handGlyph(ctx, farHand.ex, farHand.ey, farAL, 15, farInk, scale, pose.lHand, grip); // PHASE-1: the far hand runs the same mitten glyph — one hand language at every scale
     // AUDIT-2 / 0.1: the far shoe steps with its limb (farInk) — depth,
-    // not a second colour system.
-    shoeWedge(farFoot, farInk, pose.lToe ?? 0);
+    // not a second colour system. U6: the host's far shoe joins the
+    // dress-shoe leather register.
+    shoeWedge(farFoot, prof || worker ? farInk : '#111B31', pose.lToe ?? 0);
     ctx.restore();
   }
   if (!drawRest) { ctx.restore(); ctx.restore(); return; }
@@ -1923,9 +1935,25 @@ export function drawStickmanV2(
   // oversized and forward-set.
   // BLUEPRINT Phase 2 (INK): near leg 15/12/10 -> 21/16/12 — the support
   // leg is the figure's anchor mass.
-  const nearFoot = limb2(ctx, hipRX, hipRY, pose.rLU, pose.rLL, U_LEG, L_LEG, INK.legNear[0], INK.legNear[1], INK.legNear[2], ink, pose.rLift ?? 0, 1.14); // iter-3: knee mass
+  const nearFoot = limb2(ctx, hipRX, hipRY, pose.rLU, pose.rLL, U_LEG, L_LEG, INK.legNear[0], INK.legNear[1], INK.legNear[2], trouser, pose.rLift ?? 0, 1.14); // iter-3: knee mass · U6 trouser ink
   bbTouch(nearFoot.ex, nearFoot.ey, 24); // PHASE 3 bbox: near shoe
-  shoeWedge(nearFoot, ink, pose.rToe ?? 0);
+  // U6 — THE DRESS SHOE: the host's wedge draws in deep navy leather with
+  // a porcelain toe-cap glint, so the foot ANCHORS the trouser leg (the
+  // cream wedge read "barely anchored the ankles" — defect D8's second
+  // half). The cast variants keep their own shoe ink.
+  shoeWedge(nearFoot, prof || worker ? ink : '#16223E', pose.rToe ?? 0);
+  if (!prof && !worker) {
+    // the toe-cap glint — one hairline the light owns (one-light rule)
+    ctx.save();
+    ctx.strokeStyle = rgba(PALETTE.ink, 0.65);
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(nearFoot.ex + 9, nearFoot.ey + 1.5);
+    ctx.lineTo(nearFoot.ex + 16.5, nearFoot.ey + 2.5);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // 100-JUDGE PANEL / Phase 2 item 2 — LEG SMEARS ON THE RUN (report §6
   // Phase 2, p.14: "allow leg smears on the run"). The arm smear draws
@@ -2321,11 +2349,17 @@ export function drawStickmanV2(
     const hLy = shY2 + Math.cos(pose.rAU * D2R) * U_ARM + Math.cos(pose.rAL * D2R) * L_ARM;
     const hsx = cx + flipS * hLx * scale;
     const hsy = groundY + hLy * scale;
-    registerRect(
-      `contact@${Math.round(hsx)},${Math.round(hsy)}`,
-      hsx - 30 * scale, hsy - 30 * scale, 60 * scale, 60 * scale,
-      'contact'
-    );
+    // U1 refinement: the hand rect registers once the touch has LANDED
+    // (easeAt + the 480ms blend). The approach is a transient — the arm is
+    // en route to its OWN target — and a transit graze must not read as a
+    // coverage crime. The landed state stays fully guard-visible.
+    if (r.contact.easeAt === undefined || t >= r.contact.easeAt + 480) {
+      registerRect(
+        `contact@${Math.round(hsx)},${Math.round(hsy)}`,
+        hsx - 30 * scale, hsy - 30 * scale, 60 * scale, 60 * scale,
+        'contact'
+      );
+    }
   }
   // ── 100-JUDGE PANEL / PHASE 2 item 2 — POINTAT, the clearance solve ──
   // The near arm is solved so the fingertip TERMINATES on the target rect's
@@ -2340,15 +2374,22 @@ export function drawStickmanV2(
     const shYp = neckY + 3 - Math.sin(shT) * 9 + shDrop;
     const flipP = r.flip ? -1 : 1;
     const pt = r.pointAt;
-    // P2 (Verdict report — TOUCH MUST BE LEGIBLE): the verb decides the
-    // band. point-at-TEXT keeps the 40-60px clearance (the pad never crowds
-    // the letters); a TOUCH/BRACKET verb flips the sign — the fingertip
-    // lands 4-8px INSIDE the target rect's edge (hash-picked, one figure
-    // holds one overlap, scrub-stable), so the contact is physically ON the
-    // data with the FP0 fingertip and the 0.42 press shadow sealing it.
+    // U1 (STANDARD MARKET VISUAL REVIEW — THE CONTACT PASS, defect D2):
+    // the DEFAULT is now TOUCH-ON-EDGE. The arm IK-solves to land the
+    // fingertip ON the object's edge (2-6px inside the boundary — the pad
+    // seals the contact with the FP0 fingertip + press shadow), then holds.
+    // The old 40-60px strength-clearance hold — "the character presents AT
+    // the data from outside its rect" — is the defect the review convicted
+    // and is retired. Two guarded exceptions keep the rule honest:
+    //   enforce (a PROTECTIVE gate vs plating headline TEXT) keeps a
+    //     positive band, tightened 40-60 → 12-18px — the arm reads close
+    //     and committed but can still never enter the letters;
+    //   touch (the explicit touch verb) keeps its 4-8px inside-land.
     const cl = pt.touch
       ? -(4 + hash01(seed * 3.7 + 2.1) * 4)
-      : 40 + hash01(seed * 7.31 + 1.7) * 20;
+      : pt.enforce
+        ? 38 + hash01(seed * 7.31 + 1.7) * 10
+        : -(2 + hash01(seed * 7.31 + 1.7) * 4);
     // the figure's shoulder in SCENE space (the same mapping the contact
     // block inverts — rig → scene with flip)
     const shSceneX = cx + flipP * shXp * scale;
@@ -2448,15 +2489,36 @@ export function drawStickmanV2(
   // pose's own anchors (hip, neck) and the breathing cycle.
   if (r.satchel) {
     notePropDraw('satchel');
+    // D9 (STANDARD MARKET VISUAL REVIEW — PROPS WITH MASS): the satchel
+    // rides a 2-node VERLET CHAIN anchored at the shoulder — the same
+    // physics the scarf tail runs. The strap sags, the bag swings with
+    // the stride and settles when the body stops; the shoulder line
+    // SAGS 2.4 units under the strap's weight; and the bag casts its own
+    // CONTACT SHADOW on the hip. A premium prop has mass — the floating
+    // UI-sticker read is dead.
     const bagW = 46, bagH = 36;
-    const bagX = hipRX + 22, bagY = pelvisY + 30 + Math.sin(t / 2400 + seed * 3.1) * 1.2;
-    // the strap: far shoulder to the bag's top edge — ink over the vest,
-    // thick enough to read at the 320px gate
-    taper(ctx, neckX - 5, neckY + 8, bagX - bagW * 0.3, bagY - bagH * 0.42, 8, 4.5, PALETTE.ink);
-    // the bag body — rounded, slightly swung by the walk phase
+    const strapRootX = neckX - 5;
+    const strapRootY = neckY + 12.4; // +2.4: the shoulder sags under the load
+    const anchor = (ti: number): { x: number; y: number } => ({
+      x: strapRootX + Math.sin(ti / 620 + seed * 2.1) * 2.2,
+      y: strapRootY + Math.sin(ti / 900 + seed) * 1.1,
+    });
+    const restL = Math.hypot(16, 30);
+    const [sa1, sa2] = followChain(t, seed + 5.3, anchor, { x: 16 / restL, y: 30 / restL }, 26, 24, -0.0004, 0.0017, 0.84);
+    const bagX = sa2.x + 8, bagY = sa2.y + 7;
+    // the strap — two tapered segments riding the chain nodes
+    taper(ctx, strapRootX, strapRootY, sa1.x, sa1.y, 8, 5.5, PALETTE.ink);
+    taper(ctx, sa1.x, sa1.y, bagX - bagW * 0.28, bagY - bagH * 0.42, 5.5, 4.5, PALETTE.ink);
+    // the CONTACT SHADOW the bag casts on the hip (under the bag, one light)
+    ctx.fillStyle = rgba(PALETTE.shadow, 0.35);
+    ctx.beginPath();
+    ctx.ellipse(bagX + 3, bagY + bagH * 0.52 + 4, bagW * 0.52, 7.5, 0.06, 0, Math.PI * 2);
+    ctx.fill();
+    // the bag body — rounded, swung by the chain's settle (the walk adds
+    // a controlled cadence swing on top)
     ctx.save();
     ctx.translate(bagX, bagY);
-    ctx.rotate(((r.walkPhase !== undefined ? Math.sin(t / 260 + seed) * 0.06 : 0)) + (pose.pelvisTilt ?? 0) * 0.004);
+    ctx.rotate(((r.walkPhase !== undefined ? Math.sin(t / 260 + seed) * 0.07 : 0)) + (pose.pelvisTilt ?? 0) * 0.004);
     ctx.fillStyle = '#F6F1E3';
     ctx.strokeStyle = PALETTE.ink;
     ctx.lineWidth = 3;
@@ -3155,7 +3217,12 @@ export function drawStickmanV2(
   // floors stay unchanged so the feed never starves. The lens retires as the
   // DOMINANT feature — it is now a SECONDARY ACCENT: radius proportional to
   // the eye (sclera x1.28), thinner wire — the brows carry the emotion.
-  const eyeR = Math.max(5.2, featureFloor(9.1), scale >= 2 ? 8.4 : 0);
+  // U6 (STANDARD MARKET VISUAL REVIEW — defect D6, THE OWNABLE FACE): the
+  // eye floor rises 9.1 → 11 screen px (the review's "Eyes 9 to 11px with
+  // the existing glint") — the host's eyes are the face's first mass at
+  // 320px, and the sclera/pupil derive from the same floor so the whole
+  // eye grows together.
+  const eyeR = Math.max(5.2, featureFloor(11), scale >= 2 ? 10.6 : 0);
   // 100-JUDGE PANEL REPORT (defect D12 — THE SKULL READ): below rig scale
   // 1.0 the becker head's PURE-WHITE features (sclera, brows, mouth) on
   // the solid ink read as a grinning skull at feed scale (the coffee
@@ -3193,7 +3260,7 @@ export function drawStickmanV2(
   // smaller egg; the pupil derives from the SCLERA (0.76 of its radius =
   // 58% of the eye's area — past the verdict's 55% floor), never from the
   // lens, so the eye reads ink-first at every scale.
-  const scleraR = Math.max(5.5, featureFloor(6.2), scale >= 2 ? 6.2 : 0);
+  const scleraR = Math.max(5.5, featureFloor(7.4), scale >= 2 ? 7.4 : 0);
   // FP0 (Verdict P0 — GLASSES AS SECONDARY ACCENT): the lens radius is now
   // PROPORTIONAL TO THE EYE (sclera × 1.28) instead of a fixed 13.5 units —
   // the wire stops dominating the face and frames it.
@@ -3307,7 +3374,12 @@ export function drawStickmanV2(
     const y0 = -15.5 - lift - bRaise - dir * Math.tan(bAng) * 7;
     const y1 = -13.5 - lift - bRaise + dir * Math.tan(bAng) * 7;
     ctx.strokeStyle = becker ? faceInk : FACE_DARK;
-    ctx.lineWidth = Math.max(smallHead ? 5.5 : 6.5, featureFloor(7), scale >= 2 ? 9.5 : 0);
+    // U4 (STANDARD MARKET VISUAL REVIEW — defect D7, THE PERMANENT SLAB):
+    // the brow stroke drops 6.5/9.5 → 4/6.5. The heavy slab read as "mild
+    // anxiety" on every face in the film; the lighter hairline lets the
+    // brow CHANNEL (raise / angle / arch curvature) carry the emotion
+    // instead of the stroke weight shouting on every beat.
+    ctx.lineWidth = Math.max(smallHead ? 4 : 4.5, featureFloor(5), scale >= 2 ? 6.5 : 0);
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x0, y0);
@@ -3370,6 +3442,45 @@ export function drawStickmanV2(
     ctx.beginPath();
     ctx.moveTo(-2 + eyeDX, -8.5);
     ctx.lineTo(2 + eyeDX, -8.5);
+    ctx.stroke();
+  }
+  // U6 (STANDARD MARKET VISUAL REVIEW — defect D6, ONE OWNABLE ACCESSORY):
+  // THE BRASS-RIM ROUND GLASSES on the host head — the prof variant's round
+  // glasses, recolored BRASS (goldDeep rims — dark enough to count as face
+  // ink at the 320 gate), scaled to the host's egg. Two thin stroked
+  // circles + bridge + short temple hints. With the trouser ink, the
+  // glasses turn "generic white stickman" into "that channel's guy": the
+  // silhouette reads at 20px (20px of brass rim inside the head window),
+  // and the scarf stays the collar brand.
+  if (!prof && !worker && ivory) {
+    const lensHost = Math.max(12.5, featureFloor(9.5));
+    // the lens wash — a whisper of fill so the rims read as GLASSES
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath();
+    ctx.arc(-14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = PALETTE.goldDeep;
+    ctx.lineWidth = Math.max(2.6, featureFloor(2.4));
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(-14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
+    ctx.stroke();
+    // the bridge + the temple hints (the arms that reach the ears)
+    ctx.beginPath();
+    ctx.moveTo(-14 + eyeDX + lensHost, -7.5);
+    ctx.quadraticCurveTo(eyeDX, -11.5, 14 + eyeDX - lensHost, -7.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-14 + eyeDX - lensHost, -7.5);
+    ctx.lineTo(-14 + eyeDX - lensHost - 5.5, -6);
+    ctx.moveTo(14 + eyeDX + lensHost, -7.5);
+    ctx.lineTo(14 + eyeDX + lensHost + 5.5, -6);
     ctx.stroke();
   }
   // mouth (v3: articulate talk envelope when speaking, panel P0-4)

@@ -207,6 +207,8 @@ if (retentionCsv && fs.existsSync(retentionCsv)) {
       ...prev,
       viewers: Math.round(v0 * 10) / 10,
       dropPerMin: Math.round(dropPerMin * 10) / 10,
+      sceneType: b.beat.scene.type, // U14: the re-render worklist names the drawer
+      tStartSec: Math.round(t0 * 10) / 10,
       // keep any hand-written note; auto-annotate only the loud losses
       note: prev.note || (cliff ? 'measured cliff — tighten or cut in the next edit' : undefined),
     };
@@ -268,6 +270,32 @@ if (thumbsCsv && fs.existsSync(thumbsCsv)) {
 }
 
 // ── 7. write back ─────────────────────────────────────────────────────────────
+// U14 (STANDARD MARKET VISUAL REVIEW — CLOSE THE LOOP WITH MEASURED
+// RETENTION): the ingest no longer stops at a report — it emits the
+// RE-RENDER WORKLIST. Beats whose measured retention fell under 70% at
+// their midpoint are written to render-worklist.json with the exact
+// re-render command; the next staging pass starts from evidence, and
+// ONLY the weak beats re-render (the report's "re-render ONLY beats
+// under 70% retention").
+{
+  const worklist = Object.entries(out.beats || {})
+    .filter(([, b]) => typeof b.viewers === 'number' && b.viewers < 70)
+    .map(([key, b]) => ({
+      key,
+      sceneType: b.sceneType,
+      atSec: b.tStartSec,
+      retentionAtBeatStart: b.viewers,
+      dropPerMin: b.dropPerMin,
+      action: 're-render + re-stage this beat first',
+    }));
+  const wlPath = path.join(ROOT, 'render-worklist.json');
+  fs.writeFileSync(wlPath, JSON.stringify({ generatedFrom: 'ingest-analytics', thresholdPct: 70, beats: worklist }, null, 2) + '\n');
+  console.log(`\nU14 re-render worklist (beats under 70% retention): ${worklist.length}`);
+  for (const w of worklist.slice(0, 12)) {
+    console.log(`  → ${w.key} (${w.sceneType}) @ ${w.retentionAtBeatStart}% — ${w.action}`);
+  }
+  console.log(`→ ${path.relative(ROOT, wlPath)} written`);
+}
 fs.writeFileSync(DATA_OUT, JSON.stringify(out, null, 2) + '\n');
 console.log(`\n→ ${path.relative(ROOT, DATA_OUT)} updated · ${cliffCount} cliff${cliffCount === 1 ? '' : 's'} flagged`);
 console.log('the studio shows these numbers on the next load (retention rides on every beat).');

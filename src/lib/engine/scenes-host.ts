@@ -4,13 +4,13 @@
  */
 
 import { clamp01, easeInOutSine, easeOutCubic, easeOutQuad, hashStr, lerp, seamArrival, landPulse } from './easing';
-import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, glowBlob, paintBg, scenePlate, chapterFamily, FONT_DISPLAY, CAPTION_ZONE_TOP, TYPE_FLOOR } from './theme';
+import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, glowBlob, paintBg, scenePlate, chapterFamily, chapterArch, FONT_DISPLAY, CAPTION_ZONE_TOP, TYPE_FLOOR } from './theme';
 import { bokehField, drawK3D, drawK, softBloom, kMotifs, lightRays, slideUp, subjectHalo, microShake, impactRing, depthShift } from './effects';
 import { Stickman, POSES, blendPose, walkIn, nodPulse, accentPulse, launchPulse, walkSmear, take, heroTake } from './stickman';
 import { camState } from './effects';
 import { drawStickmanV2, talkAt } from './stickman-v2';
 import { HERO } from './perception';
-import { SceneCtx, declareOnScreenHeadline } from './scene-context';
+import { SceneCtx, declareOnScreenHeadline, beatExpressionOf } from './scene-context';
 import { pivotTakeStart, stageMoves, stageRestIdx, stageStartIdx } from './pivots';
 import { CARD_TEXT_PAD_BOTTOM } from './collision';
 import { reactionAt, reactionStart } from './scene-context';
@@ -166,7 +166,7 @@ export const HOST_SCALE = 2.65;
 const HOST_X = (W: number, side: 'center' | 'left' | 'right'): number =>
   side === 'left' ? W * 0.305 : side === 'right' ? W * 0.73 : W * 0.5; // fix 6.1: left stage 0.27 -> 0.305 (arms-out envelope + the -115px hero camera drift)
 
-function expressionPose(expression?: string): Partial<typeof POSES.idle> {
+export function expressionPose(expression?: string): Partial<typeof POSES.idle> {
   switch (expression) {
     case 'warm':
       return { smile: 0.55, browRaise: 0.15 };
@@ -174,6 +174,21 @@ function expressionPose(expression?: string): Partial<typeof POSES.idle> {
       return { browRaise: 0.5, smile: 0.2 };
     case 'serious':
       return { browAngle: 13, smile: 0 };
+    // U4 (STANDARD MARKET VISUAL REVIEW — defect D7, ONE FACE PER VOCAL
+    // MODE): the five voStyle registers. calm flattens the brows, urgent
+    // raises them with wide eyes, reveal trips the rig's sclera band
+    // (>0.55), quote runs the warm set. The scene drawers pass
+    // beatExpressionOf(g.beat) so all 116 beats inherit a face.
+    case 'calm':
+      return { browRaise: 0.06, browAngle: 0, smile: 0.1 };
+    case 'neutral':
+      return { browRaise: 0.12, browAngle: 0, smile: 0.12 };
+    case 'urgent':
+      return { browRaise: 0.5, browAngle: 0, smile: 0.02, eyeL: 1.18, eyeR: 1.18 };
+    case 'reveal':
+      return { browRaise: 0.88, browAngle: 0, smile: 0.18 };
+    case 'quote':
+      return { smile: 0.55, browRaise: 0.15 };
     default:
       return {};
   }
@@ -186,7 +201,7 @@ function hostStage(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
   // P1-2 (report §12.2): the host lives in a room too — the stage gets the
   // same full-bleed tone plate as the data scenes, so the presenter stands
   // in a lit space instead of on a lightbox.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   kMotifs(ctx, W, H, g.t, 0.18);
 
   const stage = g.s.stage as string;
@@ -343,6 +358,7 @@ function drawHost(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       words: g.wordTexts,
       pointBias: bias,
@@ -377,11 +393,19 @@ function drawHost(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       words: g.wordTexts,
       pointBias: bias,
+      glanceBias: side === 'left' ? 0.9 : side === 'right' ? -0.9 : 0,
     });
-    const expr = expressionPose(g.s.expression as string | undefined);
+    const expr = expressionPose(beatExpressionOf(g.beat));
+    pose = { ...pose, ...expr };
+  }
+  // U4: the walk branch blends too — the expression rides every pose,
+  // entrance included (an urgent beat ENTERS urgent).
+  if (entrance === 'walk') {
+    const expr = expressionPose(beatExpressionOf(g.beat));
     pose = { ...pose, ...expr };
   }
   const nodP = g.speaking ? nodPulse(g.beatT, g.wordTimes) : 0;
@@ -599,7 +623,7 @@ export function hostSceneV2(g: SceneCtx): void {
   // ── stage: bg + soft bokeh + faint editorial column grid ──
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): the editorial host's room — same plate, his tone.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   kMotifs(ctx, W, H, t, 0.18);
   // P1-6 (report): the editorial host's halo — the close-up composition
   // gets the strongest lift (his face is the film's recurring close shot)
@@ -674,6 +698,10 @@ export function hostSceneV2(g: SceneCtx): void {
     return s >= 0 ? blockX(s) : BLOCKS[Math.floor(hashStr(id) * BLOCKS.length) % BLOCKS.length];
   };
   const hxTarget = blockFor(g.sentenceId);
+  // U13 (walk storytelling): walkAcross beats cross on a 2200ms runway.
+  // Declared here so the entrance branch and the draw call share one clock.
+  const walkAcross = g.s.walkAcross === true;
+  const walkDurMs = walkAcross ? 2200 : 1600;
   // PANEL-12 / P1-1: the editorial host uses walkIn() — the old branch
   // eased his POSITION while holding an idle pose, which is the foot-slide
   // defect wearing a different hat (a gliding figure). Same fix, same
@@ -681,22 +709,23 @@ export function hostSceneV2(g: SceneCtx): void {
   let hx = hxTarget;
   let pose: import('./stickman').Pose;
   let walkPhase: number | undefined;
-  if (entrance === 'walk' && t < 1600) {
+  if (entrance === 'walk' && t < walkDurMs) {
     // AUDIT-3 / §1.2: entrance walk 900 → 1600ms (see drawHost) with the
-    // arrival settle into the presenting gesture.
+    // arrival settle into the presenting gesture. U13: walkAcross beats
+    // run 2200ms — the chapter's cinematic crossing.
     const arrive = Stickman.poseAt(t, {
       gesture: (g.s.gesture ?? 'present'),
       speaking: g.speaking,
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
       pointBias: 'right', // AUDIT-3 / §1.5: present toward the type block
+      glanceBias: 0.9,
     });
-    // AUDIT-PHASE-2 -> P0-5 (audit Table 2): 2.40 -> 2.10 — at 2.40 the
-    // head top sat ~70px from the frame edge (the panel read "cropped
-    // avatar" beside the logo). 2.10 keeps the close staging with ~145px
-    // of headroom; the draw-scale change below matches.
+    // AUDIT-PHASE-2 -> P0-5 (audit Table 2): the walk staging keeps the
+    // certified headroom; the draw-scale change below matches.
     // PHASE 1.1 (panel audit — THE DEAD WALK, verified fix): the runway
     // clamp 180·HOST_SCALE+100 = 577px EXCEEDED every stage block
     // (461-653px), so hxTarget - walkFrom was ≤ 0 < 120 for ALL of them and
@@ -705,9 +734,11 @@ export function hostSceneV2(g: SceneCtx): void {
     // starts at x=240: the walking hip band (±185px at contact, camera drift
     // ±37) clears the left frame edge with margin, and every walk-entrance
     // beat gets a real 221-384px cross with planted feet.
-    const walkFrom = Math.max(240, hxTarget - 500);
+    // P1-1: the runway lengthens with the crossing (a 2200ms walk at the
+    // 1600ms stride clock covers more ground — start further back).
+    const walkFrom = Math.max(240, hxTarget - (walkAcross ? 640 : 500));
     const r = hxTarget - walkFrom >= 120
-      ? walkIn(t, walkFrom, hxTarget, 1600, arrive, HOST_SCALE, 5.2)
+      ? walkIn(t, walkFrom, hxTarget, walkDurMs, arrive, HOST_SCALE, 5.2)
       : null;
     if (r) {
       hx = r.x;
@@ -743,6 +774,7 @@ export function hostSceneV2(g: SceneCtx): void {
         sentenceId: g.sentenceId,
         prevSentenceId: g.prevSentenceId,
         sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
         pointBias: 'right', // AUDIT-3 / §1.5
       });
@@ -764,6 +796,7 @@ export function hostSceneV2(g: SceneCtx): void {
         sentenceId: g.sentenceId,
         prevSentenceId: g.prevSentenceId,
         sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
         pointBias: 'right', // AUDIT-3 / §1.5
       });
@@ -845,36 +878,8 @@ export function hostSceneV2(g: SceneCtx): void {
     ctx.stroke();
     ctx.restore();
   }
-  drawStickmanV2(
-    // PANEL ACCEPTANCE (audit FIX 1): ground H*0.585 → HOST_GROUND (0.62) —
-    // at the 0.585 ground the 2.4× host's head topped out at 56px headroom
-    // (5%); the shared 0.62 ground restores the ~9% the probe gate wants.
-    ctx, hx, HOST_GROUND(H), HOST_SCALE, t,
-    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: 0.8, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.45, // VAULT NOIR: 0.55 → 0.45 — the crown band needs the drift headroom (sweep @1156-1163s)
-      // PANEL ACCEPTANCE (audit FIX 2): full-body envelope — see drawHost.
-      hostBody: true,
-      stretch: Math.min(1,
-        (walkPhase !== undefined ? walkPush(walkPhase) : 0)
-        + (g.speaking ? launchPulse(g.beatT, g.wordTimes) : 0)),
-      // 100-JUDGE AUDIT (Part 8.2): the viseme wiring on the editorial host.
-      wordTexts: g.wordTexts, wordTimes: g.wordTimes, beatT: g.beatT,
-      // 100-JUDGE PANEL / PHASE 2 item 2 — THE COVERAGE-CRIME FIX (report
-      // §6 Phase 2: "the pointing hand physically covers the word 'news' of
-      // its own headline — the gesture destroys its own target"). The
-      // presenting arm + its accent strikes now ENFORCE the clearance rule
-      // against the headline column's bounding box: the hand animates
-      // freely everywhere, and the moment a strike would cross into the
-      // 40-60px band (or the words themselves) the arm solves to the
-      // boundary — the gesture flattens against the column's edge, never
-      // plates its own text. The fingertip registers cls 'contact'; the
-      // headline registers as reading text below — the guard's hand-vs-text
-      // pass verifies the rule on every sweep frame.
-      pointAt: { x: hx2, y: 240, w: W - hx2 - 180, h: 320, enforce: true },
-    },
-    11
-  );
-
-  // ── editorial type block, right two-thirds ──
+  // ── editorial type block, right two-thirds (computation HOISTED above the
+  // host draw so U13's desk-edge contact can target the hairline rule) ──
   // AUDIT-ROUND-2 (fix 15 companion): the column shifts W*0.42 → W*0.47 so
   // the far stage block (W*0.42) never plates the kicker/headline — the
   // host PRESENTS BESIDE his content (fix 4's converse) instead of
@@ -899,6 +904,69 @@ export function hostSceneV2(g: SceneCtx): void {
     (pull.rest ? (pull.rest.length > 110 ? pull.rest.slice(0, 109) + '…' : pull.rest)
     : (voSentences[1] ? voSentences[1].slice(0, 110) :
     'Markets near record highs — and a country that feels like it’s\nfalling behind. Both are true.'));
+  // the hairline rule's Y — the desk edge the walkAcross host RESTS ON
+  // (U13: the line the figure owns — a contact verb on object B, not
+  // another point into open space). Mirrors the drawing block's math.
+  let hSizePre = 88;
+  setFont(ctx, hSizePre, 700, FONT_SERIF);
+  const maxHeadWPre = W - hx2 - 200;
+  while (Math.max(...lines.map((l) => ctx.measureText(l).width)) > maxHeadWPre && hSizePre > 54) {
+    hSizePre -= 3;
+    setFont(ctx, hSizePre, 700, FONT_SERIF);
+  }
+  const hairYPre = 330 + (Math.min(lines.length, 3) - 1) * hSizePre * 1.11 + 40;
+  // U13 (STANDARD MARKET VISUAL REVIEW — defect D14, WALK STORYTELLING):
+  // walkAcross beats swap the protective gate for the CONTACT — after the
+  // crossing lands, the palm presses the hairline rule's cap (a graphic
+  // element, never the letters). (walkAcross/walkDurMs hoisted above the
+  // entrance branch.)
+  const entranceWalking = entrance === 'walk' && t < walkDurMs;
+  // U4: the editorial host inherits the beat's face from its voStyle —
+  // blended AFTER the take blocks so the take's own brow terms ride on
+  // top during reaction windows, and the voStyle face owns the rest.
+  pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)) };
+  drawStickmanV2(
+    // PANEL ACCEPTANCE (audit FIX 1): ground H*0.585 → HOST_GROUND (0.62) —
+    // at the 0.585 ground the 2.4× host's head topped out at 56px headroom
+    // (5%); the shared 0.62 ground restores the ~9% the probe gate wants.
+    ctx, hx, HOST_GROUND(H), HOST_SCALE, t,
+    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: 0.8, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.45, // VAULT NOIR: 0.55 → 0.45 — the crown band needs the drift headroom (sweep @1156-1163s)
+      // PANEL ACCEPTANCE (audit FIX 2): full-body envelope — see drawHost.
+      hostBody: true,
+      stretch: Math.min(1,
+        (walkPhase !== undefined ? walkPush(walkPhase) : 0)
+        + (g.speaking ? launchPulse(g.beatT, g.wordTimes) : 0)),
+      // 100-JUDGE AUDIT (Part 8.2): the viseme wiring on the editorial host.
+      wordTexts: g.wordTexts, wordTimes: g.wordTimes, beatT: g.beatT,
+      // 100-JUDGE PANEL / PHASE 2 item 2 — THE COVERAGE-CRIME FIX (report
+      // §6 Phase 2: "the pointing hand physically covers the word 'news' of
+      // its own headline — the gesture destroys its own target"). The
+      // presenting arm + its accent strikes now ENFORCE the clearance rule
+      // against the headline column's bounding box: the hand animates
+      // freely everywhere, and the moment a strike would cross into the
+      // band (or the words themselves) the arm solves to the boundary —
+      // the gesture flattens against the column's edge, never plates its
+      // own text. The fingertip registers cls 'contact'; the headline
+      // registers as reading text below — the guard's hand-vs-text pass
+      // verifies the rule on every sweep frame.
+      // U13: walkAcross beats swap the protective gate for the CONTACT —
+      // after the crossing lands, the palm presses the hairline rule's
+      // cap (a graphic element, never the letters).
+      pointAt: walkAcross && !entranceWalking
+        ? { x: hx2, y: hairYPre - 8, w: 130, h: 30, hand: 'palm' as const, strength: 1 }
+        : { x: hx2, y: 240, w: W - hx2 - 180, h: 320, enforce: true },
+    },
+    11
+  );
+  if (walkAcross && !entranceWalking) {
+    // the designed desk-edge touch: the hairline rides close under the
+    // headline's text block, so the text id joins the declared contact set
+    // (the guard's hand-vs-text pass honors designed hand-on-text).
+    declareHostContact('hostV2:headline');
+    declareHostContact('hostV2:headlineTxt');
+  }
+
+  // ── editorial type block, right two-thirds (DRAWING) ──
 
   // kicker chip
   const kick = (g.s.kicker as string) ?? 'THE DATA DESK · THE EVERGREEN FUND';
@@ -1106,7 +1174,7 @@ export function splitNumbersScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): every scene sits in a room — full-bleed tone plate.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 0.9, seed: 12 });
   const mode = (s.mode as string) || 'left';
 
@@ -1193,7 +1261,8 @@ export function splitNumbersScene(g: SceneCtx): void {
     // (the 1.9 subject raise broke the frame-edge envelope the guard
     // certified at 1.5).
     drawStickmanV2(ctx, W * 0.87, H * 0.63, 1.5, t, {
-      pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT, wordTimes: g.gWordTimes }),
+      pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes }),
       alpha: clamp01((t - 500) / 500),
       look: -0.8,
       talk: g.speaking ? talkAt(g.beatT, g.wordTimes) : 0,
@@ -1255,7 +1324,8 @@ export function splitNumbersScene(g: SceneCtx): void {
       // (+32% frame area); the guard sweep re-certifies the envelope.
       // PHASE 3 COMPOSITION: single-panel mode — the panel system is the
       // hero; the host presents at the certified 1.55 participant band.
-      pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT, wordTimes: g.gWordTimes }),
+      pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes }),
       alpha: clamp01((t - 400) / 500),
       look: mode === 'left' ? -0.7 : 0.7,
       talk: g.speaking ? talkAt(g.beatT, g.wordTimes) : 0,
@@ -1501,7 +1571,7 @@ export function divergeKScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): every scene sits in a room — full-bleed tone plate.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 1.45, seed: 21, gold: 0.6 });
   lightRays(ctx, W, H, t, { alpha: 0.8 });
 
@@ -1857,6 +1927,7 @@ export function divergeKScene(g: SceneCtx): void {
       sentenceId: g.sentenceId,
       prevSentenceId: g.prevSentenceId,
       sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
     });
     // P0-3 sweep fix (host re-stage for the fist's reach): the shoulder at
@@ -2175,7 +2246,7 @@ export function channelIntroScene(g: SceneCtx): void {
   const { ctx, W, H, t, channelName } = g;
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): every scene sits in a room — full-bleed tone plate.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 1.3, seed: 33, gold: 0.6 });
   const cx = W / 2;
   const cy = H * 0.4;
@@ -2255,7 +2326,7 @@ export function recapSplitScene(g: SceneCtx): void {
   const { ctx, W, H, t } = g;
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): every scene sits in a room — full-bleed tone plate.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 1.05, seed: 44 });
   const pw = W * 0.36;
   const ph = H * 0.34;
@@ -2344,6 +2415,7 @@ export function recapSplitScene(g: SceneCtx): void {
     sentenceId: g.sentenceId,
     prevSentenceId: g.prevSentenceId,
     sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
     wordTimes: g.gWordTimes,
   });
   // PHASE 1.3: the chapter-card pivot take on the opener's side host —
@@ -2527,7 +2599,7 @@ export function paradoxResolveScene(g: SceneCtx): void {
   const { ctx, W, H, t } = g;
   paintBg(ctx, W, H, t, g.chapterTone);
   // P1-2 (report §12.2): every scene sits in a room — full-bleed tone plate.
-  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx));
+  scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 1.2, seed: 55, gold: 0.55 });
   const cx = W / 2;
   // the word "PARADOX" appears, then strikes through
@@ -2676,6 +2748,7 @@ export function paradoxResolveScene(g: SceneCtx): void {
     sentenceId: g.sentenceId,
     prevSentenceId: g.prevSentenceId,
     sentenceT: g.sentenceT,
+      sentenceDurMs: g.sentenceDurMs,
     wordTimes: g.gWordTimes,
     // AUDIT-ROUND-2 (fix 4 — UN-STRAND THE HOST): the pointing gesture now
     // carries the pointBias — and fix 11's headYaw rides the same term, so

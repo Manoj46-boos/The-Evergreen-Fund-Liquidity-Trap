@@ -20,7 +20,8 @@ import { SCRIPT } from './script-data';
  */
 export const SCENE_PROPS: Record<string, string[]> = {
   host: ['stage', 'gesture', 'expression', 'entrance', 'headline', 'sub',
-         'kicker', 'ribbon', 'chip', 'lookRight', 'lookLeft', 'walkMs'], // walkMs: 100-JUDGE REPORT fix D25 — per-beat entrance crossing time
+         'kicker', 'ribbon', 'chip', 'lookRight', 'lookLeft', 'walkMs',
+         'walkAcross'], // U13 (visual review): the chapter's walk-storytelling beat — 2200ms crossing + hairline contact on arrival
   channelIntro: [],
   splitNumbers: ['mode', 'cornerNote', 'stats', 'leftStats', 'rightStats', 'leftKicker', 'rightKicker'],
   divergeK: ['twistChip', 'opening'], // v4 (audit P0-6): opening mode hides the
@@ -39,7 +40,7 @@ export const SCENE_PROPS: Record<string, string[]> = {
   gasPump: ['source', 'cards', 'caption'],
   recessionGauge: ['source', 'debates', 'gaugeTo', 'coinChip', 'promptChip'],
   aiDatacenter: ['stats'],
-  statCards: ['source', 'cards'],
+  statCards: ['source', 'cards', 'cornerNote'], // cornerNote: U7 companion context line (rendered by statCardsScene)
   ownerWorker: ['left', 'right'],
   fundSplit: ['stats', 'callbackChip'],
   oddsSpread: ['source', 'markers', 'kicker', 'closer'],

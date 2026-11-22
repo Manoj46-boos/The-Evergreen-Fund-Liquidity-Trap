@@ -101,6 +101,7 @@ export const SCRIPT: ChapterSpec[] = [
           gesture: 'present',
           expression: 'serious',
           entrance: 'walk',
+          walkAcross: true,
           headline: '"Semi-liquid" is not\n"half as liquid as cash".',
           sub: 'Access to private assets through a redemption system — whose capacity can become the binding constraint.',
           kicker: 'THE EVERGREEN FUND · LIQUIDITY TRAP',
@@ -148,6 +149,7 @@ export const SCRIPT: ChapterSpec[] = [
           stage: 'spot',
           gesture: 'present',
           entrance: 'walk',
+          walkAcross: true,
           headline: 'The scale —\nwithout mixing datasets.',
           sub: 'Launch counts and net assets are different datasets. Same direction, different universes.',
           kicker: 'THE STRUCTURAL SHIFT',
@@ -168,10 +170,12 @@ export const SCRIPT: ChapterSpec[] = [
         }),
       },
       {
+        // U7 re-stage: the launch-count verdict becomes a STAMP — a
+        // character-led break in the barsCompare anchor run (D19).
         vo: 'That is a launch count. It is not assets under management.',
         pauseAfter: 600,
         voStyle: 'reveal',
-        scene: P('bigText', 'c2-launches', { lines: ['A launch count.', 'Not assets.'] }),
+        scene: P('stampCard', 'c2-launchcount', { stamp: 'A LAUNCH COUNT', sub: 'Not assets.', expression: 'serious' }),
       },
       {
         vo:
@@ -188,10 +192,16 @@ export const SCRIPT: ChapterSpec[] = [
         }),
       },
       {
+        // U7 re-stage: the dataset verdict becomes a pull-quote — the
+        // character owns the beat between the two bar charts (D19).
         vo: 'Different dataset. Different universe. Same direction.',
         pauseAfter: 550,
         voStyle: 'reveal',
-        scene: P('bigText', 'c2-assets', { lines: ['Different dataset.', 'Same direction.'] }),
+        scene: P('quoteCard', 'c2-direction', {
+          kicker: 'THE DISCIPLINE',
+          lines: ['Different dataset. Different universe. Same direction.'],
+          icon: 'asterisk',
+        }),
       },
       {
         vo:
@@ -210,11 +220,14 @@ export const SCRIPT: ChapterSpec[] = [
           'But three out of four respondents said the time required to get capital returned had increased over the previous year.',
         pauseAfter: 650,
         voStyle: 'reveal',
-        scene: P('statCards', 'c2-bbh', {
-          cards: [
-            { big: '75%', label: 'say the time required to get capital returned has increased over the previous year', tag: 'the friction is already measured', tone: 'down' },
-          ],
-          source: 'Source: BBH 2026 institutional investor survey',
+        // U7 re-stage: the friction number lands on the HOST (the chapter's
+        // walk-storytelling beat — he crosses to the number and presents it).
+        scene: P('host', 'c2-friction', {
+          gesture: 'count3',
+          entrance: 'walk',
+          walkAcross: true,
+          headline: 'Three out of four\nsay it takes longer.',
+          sub: 'The time required to get capital returned has increased — the friction is already measured. Source: BBH 2026 survey.',
         }),
       },
       {
@@ -314,9 +327,18 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-interval', { focus: 0 }),
       },
       {
+        // U7 re-stage: the pro-rata rule lands on the HOST leaning into the
+        // chapter's cinematic crossing (walkAcross) — the matrix anchor run
+        // breaks and the rule gets a body (D19/D14).
         vo: 'If requests exceed the offer, repurchases are generally pro rata.',
         pauseAfter: 600,
-        scene: P('wrapperMatrix', 'c3-interval', { focus: 0, highlight: 'prorate' }),
+        scene: P('host', 'c3-prorate', {
+          gesture: 'pointR',
+          entrance: 'walk',
+          walkAcross: true,
+          headline: 'Requests exceed\nthe offer — pro rata.',
+          sub: 'Everyone is scaled down proportionally. Nobody is skipped.',
+        }),
       },
       {
         vo:
@@ -325,11 +347,15 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-interval', { focus: 0, highlight: 'safeguard' }),
       },
       {
+        // U7 re-stage: the limit verdict becomes a pull-quote (character-led).
         vo:
           'That is stronger protection than a marketing promise. But it protects the offer — not an unlimited exit.',
         pauseAfter: 700,
         voStyle: 'reveal',
-        scene: P('wrapperMatrix', 'c3-interval', { focus: 0, highlight: 'limit' }),
+        scene: P('quoteCard', 'c3-limit', {
+          lines: ['Stronger than a marketing promise — and it protects the offer, not an unlimited exit.'],
+          icon: 'shield',
+        }),
       },
       {
         vo:
@@ -338,10 +364,14 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-tender', { focus: 1 }),
       },
       {
+        // U7 re-stage: the same-ad warning becomes a pull-quote.
         vo:
           'Two funds can advertise "quarterly liquidity" and still give you materially different rights.',
         pauseAfter: 600,
-        scene: P('wrapperMatrix', 'c3-tender', { focus: 1, highlight: 'contrast' }),
+        scene: P('quoteCard', 'c3-samead', {
+          lines: ['Two funds can advertise "quarterly liquidity" — and still give you materially different rights.'],
+          icon: 'shield',
+        }),
       },
       {
         vo:
@@ -363,16 +393,26 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-bdc', { focus: 2, highlight: 'board' }),
       },
       {
+        // U7 re-stage: the listed-BDC warning becomes a STAMP (character-led).
         vo:
           'Do not confuse these with publicly traded BDCs. A listed BDC can be sold on an exchange, but at the market price — which may be below net asset value. That is immediate execution, not a promise of NAV.',
         pauseAfter: 650,
-        scene: P('wrapperMatrix', 'c3-bdc', { focus: 2, highlight: 'listed' }),
+        scene: P('stampCard', 'c3-listed', {
+          stamp: 'EXECUTION, NOT A PROMISE',
+          sub: 'A listed BDC trades at the market price — which may be below NAV.',
+        }),
       },
       {
+        // U7 re-stage: the two-dimensions point becomes a stat pair.
         vo:
           'Also, a BDC using a tender-offer mechanism is still a BDC. The legal vehicle and the redemption mechanism are different dimensions.',
         pauseAfter: 650,
-        scene: P('wrapperMatrix', 'c3-bdc', { focus: 2, highlight: 'dimensions' }),
+        scene: P('statCards', 'c3-dimensions', {
+          cards: [
+            { big: 'THE VEHICLE', label: 'the legal structure — here, a non-traded BDC', tag: 'what it is', tone: 'up' },
+            { big: 'THE MECHANISM', label: 'the redemption design — tender offers in this case', tag: 'how it exits', tone: 'gold' },
+          ]
+        }),
       },
       {
         vo:
@@ -381,10 +421,15 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-eltif', { focus: 3 }),
       },
       {
+        // U7 re-stage: the ELTIF 2.0 summary lands on the HOST.
         vo:
           'ELTIF 2.0 made semi-open-ended structures easier to use and removed the old ten-thousand-euro minimum for retail investors. But an ELTIF can still be closed-ended. If it offers early redemptions, its policy must be compatible with the portfolio\u2019s liquidity, long-term strategy and investor profile.',
         pauseAfter: 650,
-        scene: P('wrapperMatrix', 'c3-eltif', { focus: 3, highlight: 'compat' }),
+        scene: P('host', 'c3-eltif-frame', {
+          gesture: 'present',
+          headline: 'Easier access.\nThe same hard questions.',
+          sub: 'ELTIF 2.0 lowers the entry floor — the liquidity design still must fit the portfolio.',
+        }),
       },
       {
         vo:
@@ -393,10 +438,14 @@ export const SCRIPT: ChapterSpec[] = [
         scene: P('wrapperMatrix', 'c3-eltif', { focus: 3, highlight: 'flex' }),
       },
       {
+        // U7 re-stage: the chapter's verdict becomes a STAMP.
         vo: 'So before comparing yields, compare the contract.',
         pauseAfter: 650,
         voStyle: 'reveal',
-        scene: P('bigText', 'c3-contract', { lines: ['Before comparing yields,', 'compare the contract.'] }),
+        scene: P('stampCard', 'c3-contract', {
+          stamp: 'COMPARE THE CONTRACT',
+          sub: 'Before comparing yields.',
+        }),
       },
       {
         vo:
@@ -430,6 +479,7 @@ const CH4: ChapterSpec = {
         stage: 'spot',
         gesture: 'present',
         entrance: 'walk',
+        walkAcross: true,
         headline: 'Follow the cash.',
         sub: 'A redemption request above five percent does not automatically mean the fund is insolvent.',
         kicker: 'THE LIQUIDITY PLUMBING',
@@ -442,10 +492,15 @@ const CH4: ChapterSpec = {
       scene: P('flowLiquidity', 'c4-flow', { mode: 'sources' }),
     },
     {
+      // U7 re-stage: the not-insolvent reassurance lands on the HOST.
       vo:
         'That is why a redemption request above five percent does not automatically mean the fund is insolvent.',
       pauseAfter: 600,
-      scene: P('flowLiquidity', 'c4-flow', { mode: 'sources', highlight: 'not-insolvent' }),
+      scene: P('host', 'c4-frame', {
+        gesture: 'present',
+        headline: 'A big request\nis not insolvency.',
+        sub: 'The fund has several sources of liquidity before it would need to sell anything.',
+      }),
     },
     {
       vo: 'But each source has a condition.',
@@ -460,11 +515,13 @@ const CH4: ChapterSpec = {
       scene: P('flowLiquidity', 'c4-flow', { mode: 'conditions', highlight: 'all' }),
     },
     {
+      // U7 re-stage: the stress-test teaser becomes a STAMP.
       vo:
         'So the useful stress test is not "Does the fund have cash today?"',
       pauseAfter: 600,
-      scene: P('bigText', 'c4-test', {
-        lines: ['The stress test is not', '"Does the fund have cash today?"'],
+      scene: P('stampCard', 'c4-test', {
+        stamp: 'THE STRESS TEST',
+        sub: 'Not "does the fund have cash today?"',
       }),
     },
     {
@@ -560,10 +617,18 @@ const CH5: ChapterSpec = {
       scene: P('caseFiles', 'c5-cliffwater', { case: 0 }),
     },
     {
+      // U7 re-stage: the framework-in-context read lands on the HOST (the
+      // chapter's walk-storytelling beat).
       vo:
         'That is an interval fund operating within a disclosed repurchase framework — not evidence, by itself, that the portfolio had failed.',
       pauseAfter: 600,
-      scene: P('caseFiles', 'c5-cliffwater', { case: 0 }),
+      scene: P('host', 'c5-frame', {
+        gesture: 'present',
+        entrance: 'walk',
+        walkAcross: true,
+        headline: 'A framework operating\nas disclosed.',
+        sub: 'Not evidence, by itself, that the portfolio had failed.',
+      }),
     },
     {
       vo:
@@ -572,10 +637,17 @@ const CH5: ChapterSpec = {
       scene: P('caseFiles', 'c5-cliffwater', { case: 0, highlight: 'read-offer' }),
     },
     {
+      // U7 re-stage: case two OPENS on the HOST crossing to the dossier.
       vo:
         'Case two: BCRED. Blackstone Private Credit Fund tells a more complicated story.',
       pauseAfter: 600,
-      scene: P('caseFiles', 'c5-bcred', { case: 1 }),
+      scene: P('host', 'c5-bcred-open', {
+        gesture: 'present',
+        entrance: 'walk',
+        walkAcross: true,
+        headline: 'Case two: BCRED —\na more complicated story.',
+        sub: 'Two quarters, two different answers — both true.',
+      }),
     },
     {
       vo:
@@ -584,10 +656,18 @@ const CH5: ChapterSpec = {
       scene: P('caseFiles', 'c5-bcred', { case: 1, quarter: 'Q1' }),
     },
     {
+      // U7 re-stage: the Q2 reversal becomes a pull-quote (character-led).
       vo:
         'Then, in a June filing, BCRED said second-quarter requests were approximately ten percent of shares outstanding and that it would fulfil five percent. It reported inflows of approximately two percent of net asset value and a net outflow of approximately three percent.',
       pauseAfter: 650,
-      scene: P('caseFiles', 'c5-bcred', { case: 1, quarter: 'Q2' }),
+      scene: P('quoteCard', 'c5-q2', {
+        kicker: 'THE ANSWER CHANGED WITH THE QUARTER',
+        lines: [
+          'Q1: every request met. Q2: five percent fulfilled against ten percent requested.',
+        ],
+        icon: 'asterisk',
+        sub: 'Source: BCRED June 2026 filing',
+      }),
     },
     {
       vo:
@@ -597,11 +677,17 @@ const CH5: ChapterSpec = {
       scene: P('caseFiles', 'c5-bcred', { case: 1, quarter: 'both' }),
     },
     {
+      // U7 re-stage: the paradox verdict becomes a STAMP — and the reaction
+      // close-up (keyed c5-both) fires ON the stamp host (D23).
       vo: 'Both — at different dates.',
       pauseAfter: 650,
       voStyle: 'reveal',
       dropOut: true,
-      scene: P('bigText', 'c5-both', { lines: ['Both —', 'at different dates.'] }),
+      scene: P('stampCard', 'c5-both', {
+        stamp: 'BOTH TRUE',
+        sub: 'At different dates.',
+        kicker: 'SO WHICH STATEMENT IS TRUE?',
+      }),
     },
     {
       vo:
@@ -610,16 +696,27 @@ const CH5: ChapterSpec = {
       scene: P('caseFiles', 'c5-bcred', { case: 1, quarter: 'both', highlight: 'denominator' }),
     },
     {
+      // U7 re-stage: the liquidity caveat becomes a STAMP.
       vo:
         'BCRED also reported more than fifteen billion dollars of available liquidity in June, including undrawn borrowing capacity. That is relevant. But available liquidity is not the same thing as an unconditional right for every investor to exit at once.',
       pauseAfter: 700,
-      scene: P('caseFiles', 'c5-bcred', { case: 1, quarter: 'liquidity' }),
+      scene: P('stampCard', 'c5-liquidity', {
+        stamp: 'AVAILABLE \u2260 UNCONDITIONAL',
+        sub: '$15B+ of liquidity is not an exit right for everyone at once.',
+      }),
     },
     {
+      // U7 re-stage: case three opens on a pull-quote (character-led).
       vo:
         'Case three: Blue Owl OBDC II. Blue Owl Capital Corporation II shows a different resolution.',
       pauseAfter: 600,
-      scene: P('caseFiles', 'c5-obdc', { case: 2, quarter: 'intro' }),
+      scene: P('quoteCard', 'c5-obdc-open', {
+        kicker: 'CASE THREE',
+        lines: [
+          'Blue Owl OBDC II shows a different resolution — a sale, a distribution, and a changed exit mechanism.',
+        ],
+        icon: 'asterisk',
+      }),
     },
     {
       vo:
@@ -708,22 +805,35 @@ const CH6: ChapterSpec = {
       scene: P('navGap', 'c6-nav', { stage: 0 }),
     },
     {
+      // U7 re-stage: the fairness caveat becomes a STAMP (character-led).
       vo: 'That does not mean the number is invented.',
       pauseAfter: 550,
-      scene: P('navGap', 'c6-nav', { stage: 0 }),
+      scene: P('stampCard', 'c6-notinvented', {
+        stamp: 'NOT INVENTED',
+        sub: 'But still an estimate.',
+      }),
     },
     {
+      // U7 re-stage: the governance requirements become a stat pair.
       vo:
         'US registered funds and BDCs operate under fair-value requirements. The board, or a designated valuation agent under board oversight, must assess valuation risks, apply and test methodologies, oversee pricing services and maintain documentation.',
       pauseAfter: 650,
-      scene: P('navGap', 'c6-nav', { stage: 1 }),
+      scene: P('statCards', 'c6-governed', {
+        cards: [
+          { big: 'GOVERNED', label: 'the board (or its valuation agent) assesses risks, tests methodologies, oversees pricing, documents everything', tag: 'fair-value requirements', tone: 'up' },
+        ]
+      }),
     },
     {
+      // U7 re-stage: the estimate line becomes a pull-quote.
       vo: 'But a governed estimate is still an estimate.',
       pauseAfter: 650,
       voStyle: 'reveal',
       dropOut: true,
-      scene: P('bigText', 'c6-estimate', { lines: ['A governed estimate', 'is still an estimate.'] }),
+      scene: P('quoteCard', 'c6-estimate', {
+        lines: ['A governed estimate is still an estimate.'],
+        icon: 'shield',
+      }),
     },
     {
       vo:
@@ -732,10 +842,18 @@ const CH6: ChapterSpec = {
       scene: P('navGap', 'c6-nav', { stage: 2 }),
     },
     {
+      // U7 re-stage: the friction lands on the HOST (the chapter's
+      // walk-storytelling beat).
       vo:
         'The Federal Reserve staff note identifies the central friction: private-asset valuations can adjust more slowly than public benchmarks. If investors believe NAV will fall, they may prefer to redeem before the markdown.',
       pauseAfter: 700,
-      scene: P('navGap', 'c6-nav', { stage: 3 }),
+      scene: P('host', 'c6-friction', {
+        gesture: 'present',
+        entrance: 'walk',
+        walkAcross: true,
+        headline: 'Private marks move\nslower than markets.',
+        sub: 'If investors believe NAV will fall, they may prefer to redeem before the markdown.',
+      }),
     },
     {
       vo: 'Here is the mechanism in its simplest form.',
@@ -750,18 +868,26 @@ const CH6: ChapterSpec = {
       scene: P('navGap', 'c6-mech', { stage: 5, hypothetical: true }),
     },
     {
+      // U7 re-stage: the reversed mechanism becomes a versus pair.
       vo:
         'Reverse the direction and the effect reverses: redeeming at an understated NAV can benefit those who stay.',
       pauseAfter: 650,
-      scene: P('navGap', 'c6-mech', { stage: 6, hypothetical: true }),
+      scene: P('splitNumbers', 'c6-reverse', {
+        mode: 'vs',
+        stats: [
+          { big: 'OVERSTATED', label: 'exit first — the stayers bear the \u221210', tone: 'down' },
+          { big: 'UNDERSTATED', label: 'exit late — the stayers gain the difference', tone: 'up' },
+        ],
+      }),
     },
     {
       vo:
         'The issue is not that every lagged mark creates a run. It is that NAV-based subscriptions and redemptions can transfer value between entering, exiting and remaining investors when the estimate is wrong.',
       pauseAfter: 700,
-      scene: P('bigText', 'c6-transfer', {
-        lines: ['NAV transfers value', 'when the estimate is wrong.'],
-        sub: 'entering · exiting · remaining investors',
+      // U7 re-stage: the transfer verdict becomes a STAMP.
+      scene: P('stampCard', 'c6-transfer', {
+        stamp: 'NAV MOVES VALUE',
+        sub: 'Between entering, exiting and remaining investors — when the estimate is wrong.',
       }),
     },
     {
@@ -791,16 +917,23 @@ const CH6: ChapterSpec = {
         'Those percentages are not added together to produce a total expense ratio. They apply to different bases.',
       pauseAfter: 650,
       voStyle: 'reveal',
-      scene: P('bigText', 'c6-bases', {
-        lines: ['Not one number.', 'Different bases.'],
-        sub: 'management · income incentive · realized gains — each applies to its own base',
+      // U7 re-stage: the bases verdict becomes a STAMP.
+      scene: P('stampCard', 'c6-bases', {
+        stamp: 'DIFFERENT BASES',
+        sub: 'Management · income incentive · realized gains — never one added-up number.',
       }),
     },
     {
+      // U7 re-stage: the share-class costs become a stat pair.
       vo:
         'Then there are share-class costs. The published Class S terms include a 0.85 percent annual distribution and servicing fee and an upfront placement fee of up to 3.5 percent. Other classes have different terms.',
       pauseAfter: 650,
-      scene: P('feeStack', 'c6-fees', { stage: 2 }),
+      scene: P('statCards', 'c6-shareclass', {
+        cards: [
+          { big: '0.85%', label: 'annual distribution and servicing fee (Class S)', tag: 'every year', tone: 'down' },
+          { big: '3.5%', label: 'upfront placement fee, at most (Class S)', tag: 'on entry', tone: 'down' },
+        ],
+      }),
     },
     {
       vo:
@@ -849,6 +982,7 @@ const CH7: ChapterSpec = {
         sub: 'A genuine counterargument — not a token paragraph before the criticism.',
         kicker: 'THE BULL CASE',
         expression: 'warm',
+        walkAcross: true,
       }),
     },
     {
@@ -858,16 +992,27 @@ const CH7: ChapterSpec = {
       scene: P('bullCase', 'c7-bull', { side: 'drawdown' }),
     },
     {
+      // U7 re-stage: the evergreen answer lands on the HOST.
       vo:
         'An evergreen fund can simplify that. You make an allocation. The fund manages deployment, reinvestment and portfolio rebalancing. For an investor without a large private-markets operations team, that is valuable.',
       pauseAfter: 650,
-      scene: P('bullCase', 'c7-bull', { side: 'evergreen' }),
+      scene: P('host', 'c7-answer', {
+        gesture: 'present',
+        headline: 'One allocation,\nmanaged for you.',
+        sub: 'Deployment, reinvestment and rebalancing built in — valuable without an operations team.',
+      }),
     },
     {
+      // U7 re-stage: the capital-efficiency argument becomes a stat pair.
       vo:
         'There is also a capital-efficiency argument. In a conventional commitment structure, uncalled capital may sit in lower-return assets while waiting to be deployed. An evergreen allocation can provide immediate exposure to an existing portfolio.',
       pauseAfter: 650,
-      scene: P('bullCase', 'c7-bull', { side: 'capital' }),
+      scene: P('statCards', 'c7-capital', {
+        cards: [
+          { big: 'UNCALLED', label: 'commitment capital can sit in lower-return assets, waiting', tag: 'the drawdown drag', tone: 'down' },
+          { big: 'IMMEDIATE', label: 'an evergreen allocation is exposed from day one', tag: 'the evergreen answer', tone: 'up' },
+        ],
+      }),
     },
     {
       vo:
@@ -918,9 +1063,10 @@ const CH7: ChapterSpec = {
       pauseAfter: 800,
       voStyle: 'reveal',
       dropOut: true,
-      scene: P('bigText', 'c7-suitability', {
-        lines: ['Suitability is a match', 'between terms and obligations.'],
-        sub: 'not a function of wealth',
+      // U7 re-stage: the suitability verdict becomes a STAMP.
+      scene: P('stampCard', 'c7-suitability', {
+        stamp: 'TERMS vs OBLIGATIONS',
+        sub: 'Suitability is a match — not a function of wealth.',
       }),
     },
   ],
@@ -1085,12 +1231,14 @@ const CH9: ChapterSpec = {
       }),
     },
     {
+      // U7 re-stage: the deeper question becomes a statement slam (the
+      // tail's C/D rhythm alternates — no anchor run over 2).
       vo:
         'Not which brand is best. Which question exposes the risk that the brochure leaves unresolved.',
       pauseAfter: 700,
-      scene: P('commentPrompt', 'c9-comments', {
-        question: 'Not which brand is best —',
-        sub: 'which question exposes the risk the brochure leaves unresolved',
+      voStyle: 'reveal',
+      scene: P('bigText', 'c9-brochure', {
+        lines: ['Not which brand is best.', 'Which question exposes the risk?'],
       }),
     },
     {

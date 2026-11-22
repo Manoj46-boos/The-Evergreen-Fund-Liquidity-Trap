@@ -1182,10 +1182,20 @@ export function drawFrame(
   // order collected first, so the watermark could never be checked). The
   // watermark sits top-left; nothing else paints over it, so the reorder
   // has no visual effect.
-  if (opts.watermark) drawWatermark(ctx, W, opts.channelName);
+  // U10 (STANDARD MARKET VISUAL REVIEW — defect D22, THE FURNITURE DIET):
+  // the watermark + progress bar STAND DOWN on the film's clean moments —
+  // chapter cards, reaction windows and every statement beat — so every
+  // chapter gets 3-4 full-bleed frames and the four fixed bands stop
+  // flattening every composition. Premium films reserve furniture for
+  // edges; the furniture now knows when to leave.
+  const inChapterCardNow = tl.chapterCards.some((cc) => t >= cc.startMs && t < cc.endMs);
+  const furnitureDiet = inChapterCardNow || reactionNow > 0.02
+    || beat.beat.scene.type === 'bigText'
+    || beat.beat.scene.type === 'stampCard';
+  if (opts.watermark && !furnitureDiet) drawWatermark(ctx, W, opts.channelName);
 
   // progress bar + chapter ticks
-  if (opts.progressBar) {
+  if (opts.progressBar && !furnitureDiet) {
     const fracs = tl.chapters.slice(1).map((c) => c.startMs / tl.durationMs);
     drawProgressBar(ctx, W, H, t / tl.durationMs, fracs);
   }

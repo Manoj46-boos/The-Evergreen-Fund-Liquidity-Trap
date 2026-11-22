@@ -617,7 +617,10 @@ export function scenePlate(
   // statement beats (bigText / stampCard / quoteCard) pass { furniture:
   // false } for a clean stage — plate, wash, floor band and family rails
   // stay; only the window/console props skip.
-  opts: { furniture?: boolean } = {}
+  // D10: the chapter's OWNED architectural register — a hairline room
+  // signature (vault arc / perspective floor / ledger shelf / ...) drawn
+  // behind the content so no two chapters share one room read.
+  opts: { furniture?: boolean; arch?: ChapterArch } = {}
 ): void {
   // VAULT NOIR ROOMS: the plate composites SOURCE-OVER at low alpha — on a
   // dark canvas a multiply plate would crush the room to black. Each tone
@@ -662,6 +665,9 @@ export function scenePlate(
     ctx.fillStyle = fg;
     ctx.fillRect(0, bandTop, W, H - bandTop);
   }
+  // D10: the chapter's owned architectural register — one hairline room
+  // signature behind every content rect (the room changes with the story).
+  if (opts.arch) drawChapterArch(ctx, W, H, opts.arch);
   // ── OWNED ENVIRONMENT LANGUAGE (dark register) ──────────────────────────
   // studio rooms ('up' / 'down'): the TERMINAL PANE top-right — a glowing
   //   glass window with a price rail (the room's light source, upper right,
@@ -1053,6 +1059,162 @@ export function chapterFamily(chapterIdx: number): string | null {
     null,       // c9 — takeaways / the close: clean stage
     null,       // c10 — the end screen: clean stage
   ] as (string | null)[])[chapterIdx] ?? null;
+}
+
+// ── D10 (STANDARD MARKET VISUAL REVIEW — ONE ARCHITECTURAL REGISTER PER
+// CHAPTER): five of nine chapters shared one interchangeable room — the
+// furniture kit (room rail, watermark lockup, glow corner, desk rule) was
+// identical, so frames were interchangeable with the chapter number
+// hidden. Every chapter now owns ONE architectural register: a hairline
+// room signature drawn at whisper alpha behind the content. The room
+// changes with the story; the eye feels "a new place" at every chapter
+// without a single new prop.
+export type ChapterArch =
+  | 'vault' | 'grid' | 'ledger' | 'pit' | 'cases'
+  | 'ticker' | 'bull' | 'checklist' | 'ring';
+
+export function chapterArch(chapterIdx: number): ChapterArch {
+  return ([
+    'vault',     // ch1 — the number behind the vault door (arc)
+    'grid',      // ch2 — the structural shift (perspective floor)
+    'ledger',    // ch3 — the four contracts (shelf rules)
+    'pit',       // ch4 — the trap mechanics (descending steps)
+    'cases',     // ch5 — the case files (drawer slots)
+    'ticker',    // ch6 — the price of the exit (ticker rail)
+    'bull',      // ch7 — the bull case (rising arc)
+    'checklist', // ch8 — the audit (checklist rail)
+    'ring',      // ch9 — liquidity as a system (the ring motif)
+  ] as ChapterArch[])[chapterIdx] ?? 'grid';
+}
+
+/** The chapter's owned architectural register — one hairline room
+ *  signature, whisper alpha, behind every content rect by construction
+ *  (drawn inside scenePlate's plate pass). Pure function of W/H/chapter. */
+export function drawChapterArch(
+  ctx: CanvasRenderingContext2D, W: number, H: number, arch: ChapterArch
+): void {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(PALETTE.gold, 0.13);
+  ctx.lineWidth = 2.5;
+  switch (arch) {
+    case 'vault': {
+      // the vault door — a giant arc segment hinged top-left
+      ctx.beginPath();
+      ctx.arc(-W * 0.06, H * 0.14, W * 0.30, -0.15, 1.35);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(-W * 0.06, H * 0.14, W * 0.24, -0.1, 1.25);
+      ctx.stroke();
+      break;
+    }
+    case 'grid': {
+      // the perspective floor — hairlines converging to a low vanishing point
+      const vpx = W * 0.42, vpy = H * 0.86;
+      for (const k of [-0.5, -0.25, 0, 0.25, 0.5, 0.8]) {
+        ctx.beginPath();
+        ctx.moveTo(W * (0.5 + k), H);
+        ctx.lineTo(vpx + (W * (0.5 + k) - vpx) * 0.42, vpy - (H - vpy) * 0.42);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'ledger': {
+      // the contract shelf — three ruled lines with tick marks
+      for (const k of [0.36, 0.52, 0.68]) {
+        const y = H * k;
+        ctx.beginPath();
+        ctx.moveTo(W * 0.055, y);
+        ctx.lineTo(W * 0.30, y);
+        ctx.stroke();
+        for (let i = 0; i < 5; i++) {
+          ctx.beginPath();
+          ctx.moveTo(W * (0.08 + i * 0.045), y - 7);
+          ctx.lineTo(W * (0.08 + i * 0.045), y + 7);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 'pit': {
+      // the descending steps — the trap's staircase, bottom-left
+      let sx = W * 0.06, sy = H * 0.30;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + W * 0.075, sy);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx + W * 0.075, sy);
+        ctx.lineTo(sx + W * 0.075, sy + H * 0.055);
+        ctx.stroke();
+        sx += W * 0.075; sy += H * 0.055;
+      }
+      break;
+    }
+    case 'cases': {
+      // the case drawers — three slot handles along the top rail
+      for (const k of [0.42, 0.58, 0.74]) {
+        const x = W * k;
+        ctx.beginPath();
+        ctx.moveTo(x - 42, H * 0.155);
+        ctx.lineTo(x + 42, H * 0.155);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, H * 0.155, 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'ticker': {
+      // the price rail — a ruled band with ticks, low-right
+      const y = H * 0.80;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.52, y);
+      ctx.lineTo(W * 0.95, y);
+      ctx.stroke();
+      for (let i = 0; i < 12; i++) {
+        const x = W * (0.54 + i * 0.033);
+        ctx.beginPath();
+        ctx.moveTo(x, y - 8);
+        ctx.lineTo(x, y + (i % 3 === 0 ? 10 : 5));
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'bull': {
+      // the rising arc — the bull diagonal, top-right
+      ctx.beginPath();
+      ctx.moveTo(W * 0.62, H * 0.62);
+      ctx.quadraticCurveTo(W * 0.80, H * 0.44, W * 0.94, H * 0.18);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(W * 0.68, H * 0.70);
+      ctx.quadraticCurveTo(W * 0.85, H * 0.55, W * 0.97, H * 0.32);
+      ctx.stroke();
+      break;
+    }
+    case 'checklist': {
+      // the audit rail — eight tick slots down the left edge
+      for (let i = 0; i < 8; i++) {
+        const y = H * (0.30 + i * 0.058);
+        ctx.beginPath();
+        ctx.rect(W * 0.045, y, 16, 16);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'ring': {
+      // the liquidity system — the dashed ring motif, centered
+      ctx.setLineDash([7, 11]);
+      ctx.beginPath();
+      ctx.arc(W * 0.5, H * 0.46, Math.min(W, H) * 0.36, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      break;
+    }
+  }
+  ctx.restore();
 }
 
 /** Paints the standard scene background: pure white base + breathing wash.
