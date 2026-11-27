@@ -14,7 +14,9 @@ import { pivotTakeStart } from './pivots';
 import { HERO } from './perception';
 import { drawStickmanV2 } from './stickman-v2';
 import { wrapText } from './charts';
-import { registerRect, registerText } from './collision';
+import { registerRect, registerText, declareHostContact } from './collision';
+// D-32: the thumbnail's fit guard guards the end screen's one-line title too
+import { fitCheck } from './thumbnail';
 
 function bg(g: SceneCtx, seed: number, gold = 0.4, strength = 0.72, bokeh = 0.85, furniture = true): void {
   paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
@@ -453,6 +455,13 @@ export function stampCardScene(g: SceneCtx): void {
   }
   const cy = H * 0.44;
   const ap = clamp01(t / 500);
+  // A-2 (the press clock — hoisted above the stamp draw): the host's palms
+  // land at 470ms; the plate yields 3px under the press through the window.
+  const pressT0 = 260, pressEnd = 760;
+  const pressP = Math.min(
+    clamp01((t - pressT0) / 210),
+    1 - clamp01((t - pressEnd) / 240)
+  );
   // P1-10 (report §12.10): the stamp draws as a function of dx so the slam
   // frame can draw it TWICE — solid at 0, plus a 1.5% offset ghost at 0.35
   // alpha — one frame of horizontal motion blur on the landing (the
@@ -460,7 +469,7 @@ export function stampCardScene(g: SceneCtx): void {
   const drawStamp = (dx: number, alphaMul: number, ghost = false): number => {
     if (alphaMul <= 0) return 0;
     ctx.save();
-    ctx.translate(cx + dx, cy);
+    ctx.translate(cx + dx, cy + 3 * pressP); // A-2: the plate yields under the press
     ctx.rotate(-0.06);
     ctx.globalAlpha = ap * alphaMul;
     // P3 hero register: the stamp drops from 1.55 (was 1.4) — a bigger
@@ -483,7 +492,15 @@ export function stampCardScene(g: SceneCtx): void {
       if (stampSq !== 0) ctx.scale(1 + 0.075 * stampSq, 1 - 0.095 * stampSq);
     }
     const txt = (s.stamp as string) || 'RECORD HIGHS';
+    // D-13 fit law on the stamp: the 110px word MEASURES and shrinks until
+    // the plate fits the frame with its margins — a long verdict can never
+    // ship its frame (and the A-2 palm edge) past the frame bound again.
     setFont(ctx, 110, 700, FONT_DISPLAY);
+    let stampSize = 110;
+    while (stampSize > 56 && ctx.measureText(txt).width > W - 320) {
+      stampSize -= 4;
+      setFont(ctx, stampSize, 700, FONT_DISPLAY);
+    }
     const tw = ctx.measureText(txt).width;
     // v8 (vision panel): the stamp frame strokes crossed THROUGH the
     // letterforms and muddied the R-E-C. A white knockout plate behind the
@@ -633,21 +650,54 @@ export function stampCardScene(g: SceneCtx): void {
       pose: { ...posed, ...expr }, alpha: Math.max(hp, 0.85 + 0.15 * rP), look: 0.5,
       faceScale: 1.8, parallax: true, parallaxAmt: 0.55,
     }, 32);
-  } else if (hp > 0) {
-    const pose = { ...POSES.close, headTilt: Math.sin(t / 700) * 4 };
-    // v3 (panel P0-3): v2 renderer
-    // P1-1 (report): +30% (1.0 → 1.3); ground → H*0.667 (envelope 767).
-    // PANEL-12 / P2-1: foreground parallax.
-    // P0 defect sweep: the exit's max camera still carried the feet band
-    // 13px into the 2-row caption pill (traced at 1000.5s). The stage
-    // rises to 0.62 — the band's worst-case bottom clears the pill by
-    // ~16px, the card row and the pose are untouched.
-    // P0 defect sweep: the FULL-FIGURE rect (feet + contact shadow) must
-    // clear the 2-row caption pill's top at the exit's max camera — the
-    // solved ground is 0.597 (feet 645, rect bottom 761, screen 782 at
-    // the 1.116 lift — 14px of air over the pill). The crown stays ~86px
-    // below the title band; the card row is untouched.
-    drawStickmanV2(ctx, W * 0.19, H * 0.597, 1.6, t, { pose, alpha: hp, look: 0.6, parallax: true }, 32); // PLAYBOOK D3: ground 0.667 -> 0.597 (full-figure rect clears the 2-row pill at max camera) · U-05: rig 1.3 → 1.6 (the 36% presence floor)
+  } else {
+    // ── 100-JUDGE VISUAL AUDIT (action A-2 — THE REFUSAL BECOMES CONTACT):
+    // the stamp plate was the sanctioned NON-CONTACT verb ("a top-band
+    // object no grounded host can reach" — the host stood back and nodded).
+    // A-2 inverts it: the host PRESSES the plate with both palms ON the
+    // slam clock — the press CAUSES the slam. The press window (approach
+    // 260ms, palms land 470ms, hold through the slam at 500, release by
+    // 1000ms) drives a both-arms-forward press pose blended over the
+    // nodding close, the near hand solved ON the plate's left band
+    // (armIk scene-space target), and the plate yields 3px under the
+    // press (the slam has a hand behind it now). Registered + declared.
+    const pressT0 = 260, pressLand = 470, pressEnd = 760;
+    const pressIn = clamp01((t - pressT0) / (pressLand - pressT0));
+    const pressOut = 1 - clamp01((t - pressEnd) / 240);
+    const pressP = Math.min(pressIn, pressOut);
+    const pressing = pressP > 0.02;
+    const closePose = { ...POSES.close, headTilt: Math.sin(t / 700) * 4 };
+    const pressPose = {
+      ...POSES.idle,
+      lAU: -58 - 10 * pressP, lAL: -62 - 8 * pressP,
+      rAU: 56 + 10 * pressP, rAL: 64 + 8 * pressP,
+      lean: 6 * pressP, headTilt: 2,
+      browRaise: 0.3 * pressP, smile: 0.2,
+    };
+    const pose = pressing ? blendPose(closePose, pressPose, pressP) : closePose;
+    const alpha = Math.max(hp, clamp01((t - 120) / 380));
+    // the plate's left band — the reachable edge (the plate spans
+    // ±(tw/2+60) about cx; the host stands at W*0.19)
+    const plateEdgeX = cx - tw / 2 - 40;
+    registerRect('stampCard:plateEdge', plateEdgeX - 26, cy - 80, 52, 160, 'contact');
+    if (t >= pressT0) {
+      declareHostContact('stampCard:plateEdge');
+      declareHostContact(`card@${Math.round(cx - tw / 2 - 60)},${Math.round(cy - 110)}`);
+    }
+    // A-5: the palm lands at the slam and RESTS on the plate edge for the
+    // rest of the beat (the press pose relaxes; the solved near hand stays
+    // ON the plate — the dwell rule's 40% floor is honest at every beat
+    // length, short stamp beats included).
+    drawStickmanV2(ctx, W * 0.19, H * 0.597, 1.6, t, {
+      pose, alpha, look: 0.6, parallax: true,
+      contact: t >= pressT0
+        // easeAt 120: the press approach is 210ms — the palm is on the plate
+        // from ~370ms, and SHORT stamp beats (the 770ms c3-plumbing class)
+        // need the hand rect visible inside their own span for the A-5
+        // dwell rule. The approach crosses open floor only (no text).
+        ? { x: plateEdgeX + 6, y: cy - 14, hand: 'palm' as const, easeAt: 90 }
+        : undefined,
+    }, 32);
   }
 }
 
@@ -1465,12 +1515,60 @@ export function endScreenScene(g: SceneCtx): void {
   setFont(ctx, 34, 700); // v9 (D-07): floor
   ctx.fillStyle = PALETTE.goldDeep;
   ctx.textAlign = 'left';
-  ctx.fillText('NEXT WEEK', nx + 24, ny + 330);
-  setFont(ctx, 34, 600);
+  // ── 100-JUDGE VISUAL AUDIT (defect D-32 — THE END SCREEN UNDERSSELLS THE
+  // NEXT CLICK): the v10 farewell showed a next-video card and a subscribe
+  // chip with NO animated hook and NO loop-back to the cold open's question
+  // — "session retention, the cheapest views a channel gets, is left on the
+  // table". The card's lower stack is rebuilt:
+  //   1. THE LOOP-BACK — the cold open's own question returns verbatim
+  //      ("A million in. You want all of it back."), closing the film's
+  //      argument loop and handing the viewer a resolved question to carry
+  //      into the next click;
+  //   2. THE ANIMATED HOOK — a brass rail under the question with the 5%
+  //      wedge riding it on a 3s loop (scrub-safe f(t)), easing toward the
+  //      WATCH NEXT chevron: the eye is WALKED from the question to the
+  //      click. The rail is the wedge's own thumbnail promise, still in
+  //      motion on the film's last frame.
+  ctx.fillText('THE QUESTION WE OPENED WITH', nx + 24, ny + 296);
+  setFont(ctx, 33, 700, FONT_DISPLAY);
   ctx.fillStyle = PALETTE.ink;
-  wrapText(ctx, nextVideoTitle, 600, 29, 600).forEach((ln, i) => {
-    ctx.fillText(ln, nx + 24, ny + 366 + i * 38);
-  });
+  const loopBack = 'A million in. You want all of it back.';
+  registerText('endScreen:loopback', nx + 24, ny + 268, 640, 44);
+  ctx.fillText(loopBack, nx + 24, ny + 330);
+  // the rail + the riding wedge (the animated hook)
+  {
+    const railY = ny + 348;
+    ctx.strokeStyle = rgba(PALETTE.gold, 0.55);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(nx + 24, railY);
+    ctx.lineTo(nx + 676, railY);
+    ctx.stroke();
+    const loopP = easeInOutSine((t % 3000) / 3000);
+    const wedgeX = nx + 24 + 652 * loopP;
+    ctx.save();
+    ctx.translate(wedgeX, railY - 7);
+    ctx.rotate(-0.06 + Math.sin(t / 700) * 0.04);
+    ctx.fillStyle = PALETTE.goldDisplay;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, 15, -0.35, 0.22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = rgba(PALETTE.ink, 0.8);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+  setFont(ctx, 27, 700, FONT_UI);
+  ctx.fillStyle = PALETTE.goldDeep;
+  ctx.fillText('NEXT WEEK', nx + 24, ny + 382);
+  // the next title — one measured line (fitCheck keeps the card's edge)
+  setFont(ctx, 28, 600);
+  const ntSize = fitCheck(ctx, [nextVideoTitle], 28, 20, 640, FONT_UI);
+  setFont(ctx, ntSize, 600);
+  ctx.fillStyle = PALETTE.ink;
+  ctx.fillText(nextVideoTitle, nx + 24, ny + 408);
   ctx.restore();
 
   // AUDIT-ROUND-2 (fix 24, panel round 2 — "OR NOTHING"): the big soft

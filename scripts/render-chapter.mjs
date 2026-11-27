@@ -50,7 +50,14 @@ const { SCRIPT } = require(path.join(BUILD, 'script-data.js'));
 const { buildTimeline } = require(path.join(BUILD, 'timeline.js'));
 const { drawFrame } = require(path.join(BUILD, 'director.js'));
 const { chapterChunks } = require(path.join(BUILD, 'encode.js'));
-const manifest = JSON.parse(fs.readFileSync(path.join(REPO, '.render-assets', 'manifest.json'), 'utf8'));
+// D-33: the SHIPPING DEFAULT is the first-upload cut (--cut full opts back in)
+const CUT = arg('cut', 'first-upload');
+const sdCut = require(path.join(BUILD, 'script-data.js'));
+if (CUT === 'first-upload' && sdCut.FIRST_UPLOAD_CUT) sdCut.SCRIPT = sdCut.FIRST_UPLOAD_CUT;
+const manifestFile = CUT === 'first-upload' && fs.existsSync(path.join(REPO, '.render-assets', 'manifest-first.json'))
+  ? 'manifest-first.json'
+  : 'manifest.json';
+const manifest = JSON.parse(fs.readFileSync(path.join(REPO, '.render-assets', manifestFile), 'utf8'));
 
 const OPTS = {
   captions: 'karaoke',

@@ -726,10 +726,27 @@ export function hostSceneV2(g: SceneCtx): void {
   // DIRECTLY ADJACENT to his exhibit — his palm rests ON its edge and his
   // presenting hand points INTO the exhibit band. "Text card + mascot"
   // becomes "presenter + his own exhibit".
-  const BLOCKS = [W * 0.235, W * 0.285, W * 0.325];
+  // ── 100-JUDGE VISUAL AUDIT (action A-1 — THE LEFT-THIRD RESERVATION IS
+  // RETIRED): the block set re-spans to the CONTENT ZONE. The report's
+  // prescription: "Replace BLOCKS = [0.24, 0.285, 0.325] with per-scene
+  // blocking that stages the host INSIDE the content zone: for
+  // right-column beats, host at 0.52-0.62 with the column at 0.14-0.48
+  // (flip the composition); for data scenes, a host block adjacent to the
+  // hero object." The editorial beats ARE the right-column beats — the
+  // composition FLIPS wholesale: the host blocks move to 0.52 / 0.565 /
+  // 0.61 and the type column moves to 0.14→colEnd. The column's right
+  // edge is set by the film's own certified hip-band law (the ±88-rig
+  // band at the near block must clear the column: 0.52·W − 243 = colEnd
+  // ≈ 757), the headline wraps to the narrower column by MEASURED fit
+  // (the D-13 fit law, now bidirectional), and the exhibit slot joins
+  // the column as its footer with the host's palm pressing its RIGHT
+  // edge — the host now stands INSIDE the content zone, between his
+  // column and his exhibit, pointing INTO both. The collision guard's
+  // full sweep certifies the new envelopes (render-check).
+  const BLOCKS = [W * 0.52, W * 0.565, W * 0.61];
   const blockX = (idx: number): number => BLOCKS[Math.max(0, Math.min(BLOCKS.length - 1, idx))];
   const blockFor = (id?: string): number => {
-    if (!id) return W * 0.34; // not speaking → the house block (centre of the set)
+    if (!id) return W * 0.565; // not speaking → the house block (centre of the set)
     const s = stageStartIdx(id);
     return s >= 0 ? blockX(s) : BLOCKS[Math.floor(hashStr(id) * BLOCKS.length) % BLOCKS.length];
   };
@@ -757,7 +774,7 @@ export function hostSceneV2(g: SceneCtx): void {
       sentenceT: g.sentenceT,
       sentenceDurMs: g.sentenceDurMs,
       wordTimes: g.gWordTimes,
-      pointBias: 'right', // AUDIT-3 / §1.5: present toward the type block
+      pointBias: 'left', // AUDIT-3 / §1.5 (A-1 flip): present toward the type block — now LEFT
       glanceBias: 0.9,
       rigScale: HOST_SCALE, // U-11: the accent plays at the staging rig
     });
@@ -773,8 +790,11 @@ export function hostSceneV2(g: SceneCtx): void {
     // beat gets a real 221-384px cross with planted feet.
     // P1-1: the runway lengthens with the crossing (a 2200ms walk at the
     // 1600ms stride clock covers more ground — start further back).
-    const walkFrom = Math.max(240, hxTarget - (walkAcross ? 640 : 500));
-    const r = hxTarget - walkFrom >= 120
+    // A-1: the entry is MIRRORED — the host enters from the RIGHT edge
+    // (his stage is the right content zone now) and walks LEFT to the
+    // block; the runway clamp keeps the walking band inside the frame.
+    const walkFrom = Math.min(1640, hxTarget + (walkAcross ? 640 : 500));
+    const r = walkFrom - hxTarget >= 120
       ? walkIn(t, walkFrom, hxTarget, walkDurMs, arrive, HOST_SCALE, 5.2)
       : null;
     if (r) {
@@ -835,14 +855,14 @@ export function hostSceneV2(g: SceneCtx): void {
         sentenceT: g.sentenceT,
         sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
-        pointBias: 'right',
+        pointBias: 'left',
         rigScale: HOST_SCALE,
       });
       const r = walkIn(t - seamAt, Math.max(Math.min(toX, seamX), 70), seamX, 900, arrive, HOST_SCALE, 5.2);
       hx = r.x;
       pose = r.walking ? r.pose : arrive;
       if (r.walking) walkPhase = r.phase;
-    } else if (Math.abs(toX - fromX) > W * 0.015 && inWindow && Math.min(fromX, toX) >= 70) {
+    } else if (Math.abs(toX - fromX) > W * 0.015 && inWindow && Math.max(fromX, toX) <= 1690) {
       const arrive = Stickman.poseAt(t, {
         gesture: (g.s.gesture ?? 'present'),
         speaking: g.speaking,
@@ -851,7 +871,7 @@ export function hostSceneV2(g: SceneCtx): void {
         sentenceT: g.sentenceT,
       sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
-        pointBias: 'right', // AUDIT-3 / §1.5
+        pointBias: 'left', // AUDIT-3 / §1.5 (A-1 flip)
         rigScale: HOST_SCALE, // U-11: the accent plays at the staging rig
       });
       // P0-5: rigScale matched to the presenting draw scale.
@@ -877,7 +897,7 @@ export function hostSceneV2(g: SceneCtx): void {
         sentenceT: g.sentenceT,
       sentenceDurMs: g.sentenceDurMs,
         wordTimes: g.gWordTimes,
-        pointBias: 'right', // AUDIT-3 / §1.5
+        pointBias: 'left', // AUDIT-3 / §1.5 (A-1 flip)
       });
     }
   }
@@ -892,9 +912,14 @@ export function hostSceneV2(g: SceneCtx): void {
   // column shifts to the half-line on those stages only — enough to clear
   // the gesture cone without worsening the column's own worst-camera edge
   // envelope (the sweep is the referee).
-  const hx2 = (g.s.stage === 'kflip' || g.s.stage === 'kclimb' || g.s.stage === 'kdescend')
-    ? W * 0.50
-    : W * 0.47;
+  // A-1: the flipped type column — LEFT third (colL → colEnd). The
+  // column's right edge is the film's own certified hip-band law at the
+  // near block (0.52·W − 243 ≈ 757): the ±88-rig band + camera drift
+  // must clear the reading text. The k* stages' half-line shift mirrors.
+  const colL = (g.s.stage === 'kflip' || g.s.stage === 'kclimb' || g.s.stage === 'kdescend')
+    ? W * 0.16
+    : W * 0.14;
+  const colEnd = W * 0.52 - 243;
   const nodP = g.speaking ? nodPulse(g.beatT, g.wordTimes) : 0;
   const talk = g.speaking ? talkAt(g.beatT, g.wordTimes) : 0;
   // 100-JUDGE PANEL / Phase 2 item 4 — TAKE GRAMMAR WIRING (report §6
@@ -951,9 +976,10 @@ export function hostSceneV2(g: SceneCtx): void {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(W * 0.10, stage === 'kclimb' ? hyR + 60 : hyR - 120);
-    ctx.lineTo(hx - 24, hyR);
-    ctx.lineTo(hx + 66, hyR);
+    // A-1: mirrored — the ramp approaches from the RIGHT edge to the host
+    ctx.moveTo(W * 0.90, stage === 'kclimb' ? hyR + 60 : hyR - 120);
+    ctx.lineTo(hx + 24, hyR);
+    ctx.lineTo(hx - 66, hyR);
     ctx.stroke();
     ctx.restore();
   }
@@ -965,13 +991,17 @@ export function hostSceneV2(g: SceneCtx): void {
   // standing under it. (hx2 hoisted above — the host's clearance rule
   // consumes it before this block.)
   const voSentences = (g.beat.vo || '').match(/[^.!?]+[.!?]*/g)?.map((s) => s.trim()).filter(Boolean) ?? [];
+  // A-1: the derived pull-quote wraps to the FLIPPED column by measured
+  // fit (≈17 chars/line at the 54px floor) — the wrap width is derived
+  // from the column, never hardcoded.
+  const colChars = Math.max(10, Math.floor((colEnd - colL - 48) / 27));
   const mkPull = (txt: string): { head: string; rest: string } => {
     const words = txt.replace(/\s+/g, ' ').split(' ').filter(Boolean);
     const hLines: string[] = [];
     let i = 0;
     while (i < words.length && hLines.length < 3) {
       let line = words[i++];
-      while (i < words.length && (line + ' ' + words[i]).length <= 26) line += ' ' + words[i++];
+      while (i < words.length && (line + ' ' + words[i]).length <= colChars) line += ' ' + words[i++];
       hLines.push(line);
     }
     return { head: hLines.join('\n'), rest: words.slice(i).join(' ') };
@@ -988,7 +1018,7 @@ export function hostSceneV2(g: SceneCtx): void {
   // another point into open space). Mirrors the drawing block's math.
   let hSizePre = 88;
   setFont(ctx, hSizePre, 700, FONT_SERIF);
-  const maxHeadWPre = W - hx2 - 200;
+  const maxHeadWPre = colEnd - colL - 24;
   while (Math.max(...lines.map((l) => ctx.measureText(l).width)) > maxHeadWPre && hSizePre > 54) {
     hSizePre -= 3;
     setFont(ctx, hSizePre, 700, FONT_SERIF);
@@ -1007,13 +1037,31 @@ export function hostSceneV2(g: SceneCtx): void {
   // below). The far-block host parks ADJACENT to this slot; his palm
   // presses its left edge and his presenting hand solves INTO the band —
   // the "figure floats beside the data" read is retired at the layout law.
-  const fp = clamp01((t - 1100) / 500);
-  const ex0 = W * 0.352;
+  // A-1: the exhibit slot joins the flipped COLUMN as its footer — the
+  // host's palm presses its RIGHT edge (the edge nearest his blocks).
+  // A-1/A-5: the exhibit's clock is the SCENE clock (sceneT — it never
+  // resets inside the run). The old group-clock key re-armed the
+  // pre-exhibit gate at every 12s cap seam (a 13.5s beat re-split at its
+  // sentence seams resets `t` mid-beat), re-fading the card and re-arming
+  // the gate dozens of times per scene — and the hand-dwell gate read the
+  // beat's palm as 0% landed. The exhibit arrives ONCE per scene.
+  // A-1: the exhibit slot joins the flipped COLUMN as its footer — and
+  // extends to the report's own column bound (0.48W): the reading TEXT
+  // stops at the certified hip-band line (colEnd = 757), the exhibit
+  // CARD — a declared contact object, not reading text — spans the full
+  // 0.14→0.48 zone so the host's palm reaches its right edge from EVERY
+  // stage block (reach check: far block 129 rig ≤ the 130-rig arm; the
+  // hip-band overlap with the card's right band is the DESIGNED staging,
+  // the D-01 adjacency mirrored).
+  const fp = clamp01((g.sceneT - 1100) / 500);
+  const ex0 = colL;
   const ey0 = 604;
-  // Panel fix (guard sweep, 692s): the right margin widens 180 → 240 so
-  // the card survives the worst exit camera (truck + 1.06 push) without
-  // crossing the frame edge — the wider column shift demanded it.
-  const ew = W - ex0 - 240;
+  // exR arbitrates on the ARM: the real limb is 112 rig units (58+54) —
+  // the far block's shoulder is ~297 scene px from any palm point at the
+  // card's working height, so the card's right edge lands at 0.51W (the
+  // reading TEXT still stops at the hip-band line colEnd = 0.394W).
+  const exR = W * 0.51;
+  const ew = exR - colL;
   const eh = 152;
   const exKey = String(g.s.sceneKey ?? g.beat.scene.sceneKey ?? 'host');
   const exVariant = stage === 'chartstand' ? 1
@@ -1101,7 +1149,8 @@ export function hostSceneV2(g: SceneCtx): void {
   if (exitCharP2 > 0 && walkPhase === undefined) {
     // bound by the guard's hip envelope (±88 rig units): the hip band's
     // left edge never crosses x=40 — the walk commits, the cut lands first.
-    exitWalkX2 = -Math.min(420, Math.max(0, hx - (40 + 88 * HOST_SCALE))) * exitCharP2;
+    // A-1: mirrored — the host walks OUT toward his entry edge (RIGHT).
+    exitWalkX2 = Math.min(420, Math.max(0, (W - 40 - 88 * HOST_SCALE) - hx)) * exitCharP2;
     walkPhase = exitCharP2 * 2.6;
     exitFlip = true;
   }
@@ -1146,11 +1195,26 @@ export function hostSceneV2(g: SceneCtx): void {
       // registered, declared object) and the gesture never again points
       // into open space short of the data. Before the exhibit arrives
       // (fp < 0.5) the certified headline-band gate still owns the arm.
-      pointAt: walkAcross && !entranceWalking
-        ? { x: hx2, y: hairYPre - 8, w: 130, h: 30, hand: 'palm' as const, strength: 1 }
-        : fp > 0.5
-          ? { x: ex0 + 4, y: ey0 + 26, w: 150, h: 72, hand: 'palm' as const, strength: 1 }
-          : { x: hx2, y: 240, w: W - hx2 - 180, h: 320, enforce: true },
+      // A-1 + A-5: once the exhibit is up, the presenting hand's target IS
+      // the exhibit — the palm lands ON its RIGHT band (the edge nearest
+      // the flipped blocks; reach 76-129 rig from every block). The
+      // walkAcross special-case (the hairline-cap press at the column's
+      // old right edge) retires with the flip: the hairline now sits at
+      // the column's LEFT edge — a 700px reach that straightened the arm
+      // and pulled the root into the column (the @656s graze class). The
+      // crossing host palms the exhibit like every other beat.
+      // A-5 THE REACH LAW (measured, not assumed): the rig's arm is 58+54
+      // = 112 rig units — from the presenting shoulder (~y 274 screen) the
+      // reachable cone bottoms at y ≈ 571, so NO floor-level card edge is
+      // palmable from any block (the old D-01 palm target sat 356px below
+      // the shoulder — the arm fell short every frame; the A-5 gate is the
+      // first harness that measures it). The premium verb that IS honest:
+      // the presenter's POINTER STAFF leans against the exhibit and the
+      // hand GRIPS it — the staff's grip zone rises into the reachable
+      // cone from ALL THREE blocks (85-110 rig ≤ 112).
+      pointAt: fp > 0.5
+        ? { x: exR - 24, y: 466, w: 64, h: 158, hand: 'fist' as const, strength: 1 }
+        : { x: colL, y: 240, w: colEnd - colL - 24, h: 320, enforce: true },
     },
     11
   );
@@ -1171,6 +1235,39 @@ export function hostSceneV2(g: SceneCtx): void {
     declareHostContact('hostV2:exhibit');
     declareHostContact(`card@${Math.round(ex0)},${ey0}`);
     if (exVariant === 1) declareHostContact('hostV2:easel');
+    declareHostContact('hostV2:exhibitStaff');
+  }
+  // THE POINTER STAFF (A-5): a brass presentation staff leaning against
+  // the exhibit's right end — the grip knob rises into the arm's reachable
+  // cone, so the fist ON the staff is a REAL contact at every stage block.
+  // Registered (contact class) + declared with the exhibit.
+  if (fp > 0.5) {
+    const stfTop = 470, stfBot = ey0 + 2;
+    ctx.save();
+    ctx.globalAlpha = fp;
+    ctx.strokeStyle = rgba(PALETTE.goldDeep, 0.9);
+    ctx.lineWidth = 9;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(exR + 28, stfTop + 14);
+    ctx.lineTo(exR - 8, stfBot);
+    ctx.stroke();
+    ctx.strokeStyle = PALETTE.goldDisplay;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(exR + 28, stfTop + 14);
+    ctx.lineTo(exR - 8, stfBot);
+    ctx.stroke();
+    // the grip knob
+    ctx.fillStyle = PALETTE.goldDisplay;
+    ctx.beginPath();
+    ctx.arc(exR + 26, stfTop + 16, 13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = rgba(PALETTE.ink, 0.7);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+    registerRect('hostV2:exhibitStaff', exR - 20, stfTop, 62, stfBot - stfTop + 10, 'contact');
   }
 
   // ── editorial type block, right two-thirds (DRAWING) ──
@@ -1190,21 +1287,21 @@ export function hostSceneV2(g: SceneCtx): void {
       : 'THE DATA DESK · THE EVERGREEN FUND');
   setFont(ctx, 34, 600); // v9 (D-07): floor
   const kw = ctx.measureText(kick).width;
-  registerRect('hostV2:kicker', hx2, 168, kw + 48, 52);
+  registerRect('hostV2:kicker', colL, 168, kw + 48, 52);
   const ap = clamp01((t - 150) / 500);
   if (ap > 0) {
     ctx.save();
     ctx.globalAlpha = ap;
     ctx.fillStyle = PALETTE.goldWash;
-    roundRect(ctx, hx2, 168, kw + 48, 52, 26);
+    roundRect(ctx, colL, 168, kw + 48, 52, 26);
     ctx.fill();
     ctx.strokeStyle = rgba(PALETTE.gold, 0.8);
     ctx.lineWidth = 2;
-    roundRect(ctx, hx2, 168, kw + 48, 52, 26);
+    roundRect(ctx, colL, 168, kw + 48, 52, 26);
     ctx.stroke();
     ctx.fillStyle = PALETTE.goldDeep;
     ctx.textAlign = 'left';
-    ctx.fillText(kick, hx2 + 24, 202);
+    ctx.fillText(kick, colL + 24, 202);
     ctx.restore();
   }
 
@@ -1225,32 +1322,41 @@ export function hostSceneV2(g: SceneCtx): void {
     declareOnScreenHeadline(lines.join(' '));
     ctx.save();
     ctx.globalAlpha = hp;
-    registerRect('hostV2:headline', hx2, 240, W - hx2 - 180, 320);
+    registerRect('hostV2:headline', colL, 240, colEnd - colL - 24, 320);
     // PHASE 2 item 2: the headline joins the READING-TEXT registry — the
     // guard's hand-vs-text pass verifies the clearance rule (the host's
     // pointAt above enforces it) on every frame; the text-vs-text pass
     // skips same-family ids, so the pair never self-collides.
-    registerText('hostV2:headlineTxt', hx2, 240, W - hx2 - 180, 320);
+    registerText('hostV2:headlineTxt', colL, 240, colEnd - colL - 24, 320);
     let hSize = 88;
     setFont(ctx, hSize, 700, FONT_SERIF);
-    const maxHeadW = W - hx2 - 200; // guard sweep: survives the exit camera
-    while (Math.max(...lines.map((l) => ctx.measureText(l).width)) > maxHeadW && hSize > 54) {
-      hSize -= 3;
+    const maxHeadW = colEnd - colL - 24; // A-1: the flipped column's measured width
+    // A-1: measured WRAP-AND-FIT — at each size the explicit lines wrap to
+    // the column; the size is accepted when the wrapped block fits BOTH
+    // the width and the 3-line stack. No overflow at the floor (the D-13
+    // overflow class stays closed on the flipped column too).
+    let draw = lines.slice(0, 3);
+    for (; hSize > 54; hSize -= 3) {
       setFont(ctx, hSize, 700, FONT_SERIF);
+      const wrapped = lines.flatMap((l) => wrapText(ctx, l, maxHeadW, hSize, 700));
+      if (wrapped.length <= 3 && Math.max(...wrapped.map((l) => ctx.measureText(l).width)) <= maxHeadW) {
+        draw = wrapped;
+        break;
+      }
     }
     setFont(ctx, hSize, 700, FONT_SERIF);
     // D9 companion: up to THREE headline lines (ink / gold / ink) — the
     // VO-derived pull-quotes wrap wider than the two-line props; the
     // hairline and sub copy anchor below the LAST line.
     const lineCols = [PALETTE.ink, PALETTE.goldDeep, PALETTE.ink];
-    lines.slice(0, 3).forEach((l, i) => {
+    draw.slice(0, 3).forEach((l, i) => {
       ctx.fillStyle = lineCols[Math.min(i, lineCols.length - 1)];
-      ctx.fillText(l, hx2, 330 + i * hSize * 1.11);
+      ctx.fillText(l, colL, 330 + i * hSize * 1.11);
     });
     // hairline + sub copy — anchored to the (possibly shrunk) headline
-    const hairY = 330 + (Math.min(lines.length, 3) - 1) * hSize * 1.11 + 40;
+    const hairY = 330 + (Math.min(draw.length, 3) - 1) * hSize * 1.11 + 40;
     ctx.fillStyle = PALETTE.gold;
-    roundRect(ctx, hx2, hairY, 96, 6, 3);
+    roundRect(ctx, colL, hairY, 96, 6, 3);
     ctx.fill();
     setFont(ctx, 34, 400);
     ctx.fillStyle = PALETTE.inkSoft;
@@ -1258,7 +1364,7 @@ export function hostSceneV2(g: SceneCtx): void {
     // right frame edge, clipped mid-word, no wrap. Each explicit line now
     // WRAPS to the text column (the same wrapText the cards use); the
     // yield-to-K-fig-panel budget applies to the wrapped lines.
-    const colW = W - 96 - hx2;
+    const colW = colEnd - colL - 24;
     const subLines = sub.split('\n').flatMap((ln) => wrapText(ctx, ln, colW, 34, 400));
     // FIX D-01 (companion — THE SUB-COPY CLIP): the sub must END above the
     // exhibit card (ey0 - 18). The old 596 budget let 3-line headlines
@@ -1266,7 +1372,7 @@ export function hostSceneV2(g: SceneCtx): void {
     // audit frame shipped "e yield." clipped under the card). Lines that
     // do not fit are cut by the LAYOUT, never by another object's ink.
     const maxSub = Math.max(0, Math.floor(((ey0 - 18) - (hairY + 72)) / 44));
-    subLines.slice(0, maxSub).forEach((ln, i) => ctx.fillText(ln, hx2, hairY + 72 + i * 44));
+    subLines.slice(0, maxSub).forEach((ln, i) => ctx.fillText(ln, colL, hairY + 72 + i * 44));
     ctx.restore();
   }
 

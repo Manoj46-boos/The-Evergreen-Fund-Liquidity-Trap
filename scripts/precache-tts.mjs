@@ -43,8 +43,19 @@ if (!fs.existsSync(path.join(BUILD, 'script-data.js'))) {
     { stdio: 'inherit', cwd: REPO }
   );
 }
-const { SCRIPT } = require(path.join(BUILD, 'script-data.js'));
+const sd = require(path.join(BUILD, 'script-data.js'));
+const ph = require(path.join(BUILD, 'pipeline-helpers.js'));
 const { allChunks } = require(path.join(BUILD, 'pipeline.js'));
+
+// D-33: the SHIPPING DEFAULT is the first-upload cut (--cut full opts back
+// in). The cut swaps the module's SCRIPT before the chunks are derived —
+// the TTS cache is TEXT-keyed, so the cut's lines hit the same cache.
+const CUT = arg('cut', 'first-upload');
+if (CUT === 'first-upload' && sd.FIRST_UPLOAD_CUT) {
+  sd.SCRIPT = sd.FIRST_UPLOAD_CUT;
+  ph.SCRIPT = sd.FIRST_UPLOAD_CUT;
+}
+const SCRIPT = sd.SCRIPT;
 
 const VOICE = arg('voice', 'en-US-AndrewMultilingualNeural');
 const RATE = Number(arg('rate', -4));
@@ -144,9 +155,10 @@ async function mp3DurationMs(p) {
       if (done % 20 === 0) console.log(`  measured ${done}/${chunks.length}`);
     }
     fs.mkdirSync(path.join(REPO, '.render-assets'), { recursive: true });
-    fs.writeFileSync(path.join(REPO, '.render-assets', 'manifest.json'), JSON.stringify(manifest));
+    const manifestName = CUT === 'first-upload' ? 'manifest-first.json' : 'manifest.json';
+    fs.writeFileSync(path.join(REPO, '.render-assets', manifestName), JSON.stringify(manifest));
     // print the projected runtime
     const totalMs = Object.values(manifest.lines).reduce((a, l) => a + l.durationMs, 0);
-    console.log(`manifest written · raw VO runtime ≈ ${(totalMs / 60000).toFixed(1)} min (plus pauses)`);
+    console.log(`manifest written (${manifestName}, cut ${CUT}) · raw VO runtime ≈ ${(totalMs / 60000).toFixed(1)} min (plus pauses)`);
   }
 })();

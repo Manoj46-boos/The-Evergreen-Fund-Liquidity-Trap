@@ -875,8 +875,24 @@ export function chartJourneyScene(g: SceneCtx): void {
     // margins), so the grip only fires when the station genuinely sits over
     // drawn ink — a fist closing on air left of the plot would be the
     // exact "nobody is supervising the frame" read the audit convicted.
-    let gripJ: { x: number; y: number; hand: 'fist' } | undefined;
-    if (phaseJ === undefined && hxJ >= chartX && hxJ <= chartX + chartW) {
+    // ── 100-JUDGE VISUAL AUDIT (action A-3 — POINTS UP INTO IT): the
+    // planted verb becomes the POINT — the walkway IS below the plot (the
+    // D-12 fix), and the planted hand now points UP INTO the plot at the
+    // drawn line's own y (the solved target, clamped to reach): the figure
+    // reads the value off the chart for the viewer instead of gripping the
+    // paper. The pointer glyph + the press shadow seal the read.
+    let gripJ: { x: number; y: number; hand: 'point' } | undefined;
+    // A-5: at the MARGIN stations the hand still lands ON the plot — the
+    // near corner of the drawn chart (the axis corner at his side): the
+    // figure points UP into the plot's edge without his body ever entering
+    // the data band (the D-12 staging keeps, the contact lands).
+    if (phaseJ === undefined && (hxJ < chartX || hxJ > chartX + chartW)) {
+      gripJ = {
+        x: hxJ < chartX ? chartX + 10 : chartX + chartW - 10,
+        y: chartY + (series.length > 1 ? 66 : 0) + chartH - 44,
+        hand: 'point',
+      };
+    } else if (phaseJ === undefined && hxJ >= chartX && hxJ <= chartX + chartW) {
       const xfJ = (hxJ - chartX) / chartW;
       if (drawP >= xfJ + 0.02) {
         let yMinJ = Infinity, yMaxJ = -Infinity;
@@ -899,7 +915,7 @@ export function chartJourneyScene(g: SceneCtx): void {
         const plotYJ = chartY + (series.length > 1 ? 66 : 0);
         const gyJ = plotYJ + chartH - ((gvJ - yMinJ) / (yMaxJ - yMinJ)) * chartH;
         const crownJ = floorY - 241 * 1.2;
-        gripJ = { x: hxJ, y: clamp(gyJ, crownJ - 24, floorY - 54), hand: 'fist' };
+        gripJ = { x: hxJ, y: clamp(gyJ, crownJ - 24, floorY - 54), hand: 'point' };
       }
     }
     // B5/B7 RE-SPEC: the walker runs the readable cast tier (1.2) — same
@@ -1061,15 +1077,26 @@ export function dotGridScene(g: SceneCtx): void {
   // through every exit-window camera state (the 0.86→0.82 move re-ran
   // the two columns together; the field now ends at x=1200, the host's
   // envelope starts ~1500 — no shared band at any certified camera).
+  // ── 100-JUDGE VISUAL AUDIT (action A-2 — THE GOLD BAND IS A PINNED PROP):
+  // the ten gold dots + the highlight band relocate to the field's TOP-RIGHT
+  // corner (highlightFrom 15: row 0, cols 15-24) — inside the presenter's
+  // arm envelope — and the host STEPS to the field's right edge with his
+  // palm ON the band's right edge: the pin. The old staging parked him at
+  // W*0.78 with the band 1,300px away behind a "deliberate refusal" — the
+  // A-2 verb conversion retires the refusal: the hand lands ON the object
+  // every frame. Reach check: shoulder ≈ (1434, 413) → band edge (1322,
+  // 266) ≈ 205px < the 232px arm envelope — no root pull, the palm pins.
   dotGrid(ctx, {
     x: 190, y: gridY, w: W - 800, h: gridH, // fix 6.1: field narrows (W-720 -> W-800) — the 1.45 side host's body envelope overlapped it (guard 'host' class)
     total: (s.total as number) || 500,
     highlight: (s.highlight as number) || 10,
+    highlightFrom: 15,
     p: clamp01(t / 1600), // B18
     t,
   });
   // the highlight band — a rounded gold wash cradling the ten gold dots
-  // (row 0, cols 0-9). Drawn AFTER the grid so it tints the dots' backs.
+  // (row 0, cols 15-24 — the pinned corner). Drawn AFTER the grid so it
+  // tints the dots' backs.
   {
     const bandP = clamp01((t - 2600) / 700);
     if (bandP > 0) {
@@ -1077,7 +1104,7 @@ export function dotGridScene(g: SceneCtx): void {
       ctx.globalAlpha = bandP;
       const cw = (W - 800) / 25; // fix 6.1: matches the narrowed field
       const rowH = gridH / Math.ceil(((s.total as number) || 500) / 25);
-      const bx = 190 - 14;
+      const bx = 190 + 15 * cw - 14;
       const by = gridY - 12;
       const bw = 10 * cw + 28;
       const bh = rowH + 24;
@@ -1089,6 +1116,10 @@ export function dotGridScene(g: SceneCtx): void {
       roundRect(ctx, bx, by, bw * bandP, bh, 16);
       ctx.stroke();
       ctx.restore();
+      // A-2: the band is a CONTACT object now — registered + declared so
+      // the guard's host-vs-content pass exempts exactly this rect.
+      registerRect('dotGrid:band', bx, by, bw, bh, 'contact');
+      declareHostContact('dotGrid:band');
     }
   }
   // caption block — count-up + statement, one line, nothing above to hit
@@ -1126,32 +1157,19 @@ export function dotGridScene(g: SceneCtx): void {
   }
   // PANEL-10 (D-10 class): W*0.9 → W*0.84 — dotGrid is a push scene (no
   // hero move, base 0.052); the envelope crossed x=1920 at full push.
-  // v10.1 (panel 11 re-review, host-vs-content): W*0.84 → W*0.86 — the full
-  // body envelope (cls 'host') must clear the dot grid's registered field;
-  // the grid also narrows (W-400 → W-460) so data and presenter each own
-  // their column. Edge worst case at 0.86: (1651+133-960)*1.092+960 ≈ 1860.
-  // ── 100-JUDGE PANEL / PHASE 1 item 1 — THE DELIBERATE REFUSAL (report §6
-  // Phase 1: "…or a deliberate crossed-arm refusal"). The grid's gold band
-  // (10 of 500) sits 1,300px from the host column — no re-stage brings it
-  // inside a 162px arm envelope without plating the registered dot field
-  // (v10.1 certified the 1500px host-vs-grid clearance). So the host takes
-  // the audit's OTHER sanctioned verb: arms FOLD across the chest, brows
-  // flat, smile gone — the body reads "only ten?" at the exact data the VO
-  // disputes, and the gaze commits to the gold band (eyes -0.85, the
-  // head's pointBias already turns him left). A refusal, not a shrug.
-  // 100-JUDGE VISUAL AUDIT (Fix 3 — HOST-SCALE HIERARCHY): W*0.8/1.45 →
-  // W*0.78/1.5 — the premium band; the refusal stance keeps its distance
-  // read (one body-length from the narrowed field's end at x 1200: the core
-  // at 1497±117 starts 180px right of the field — inside one body-length).
-  // PHASE 1 (100-Judge audit §5 — the frame-08 verdict): the prior refusal
-  // stance read at feed scale as "walking in place beside data he never
-  // touches". The grid's gold band stays out of arm reach, but PRESENTING
-  // needs no reach: the presenter now runs the standard gesture cycle whose
-  // 4th term is the point-in pose aimed at the band (faceDir 'left'), the
-  // engine's own declared contact verb for a presenter whose object sits
-  // beyond his envelope.
-  hostSmall(g, W * 0.78, 'present', 8, H * 0.66, 1.5, 0, 'aha', 1.4, 1, true, 0.4,
-    undefined, undefined, undefined, 'left', undefined,
+  // ── 100-JUDGE VISUAL AUDIT (action A-2 — THE PIN): the host steps to the
+  // field's right edge (W*0.772 = 1482, one body-length from the field's
+  // end at 1310) and his near palm lands ON the band's right edge at its
+  // own height — the band is pinned from the moment it draws. The gesture
+  // cycle keeps his body language; the contact solves the near arm to the
+  // band every frame (the hip envelope narrows to the body core in
+  // contact mode, so the widened field clearance still certifies).
+  hostSmall(g, W * 0.772, 'present', 8, H * 0.62, 1.5, 0, 'aha', 1.4, 1, true, 0.4,
+    undefined, undefined,
+    // A-2: the pin — palm ON the band's right edge (band right edge =
+    // 190 + 25·cw + 14 = 1324 at 1080p). easeAt: the band lands at 2600.
+    { x: 190 + (W - 800) + 14, y: gridY + 14, hand: 'palm', easeAt: 2700 },
+    'left', undefined,
     // P2 (Verdict report — BALANCE THE NUMBERS): the counting beat's coin
     // stack rides the near palm, ledger-resolved.
     resolveProp('dotGrid', 'coinStack', true) ? 'coinStack' : undefined);

@@ -20,7 +20,7 @@
 
 import { Timeline } from './timeline';
 import { pickShortMoments, ShortSpec } from './shorts';
-import { TITLE_OPTIONS } from './script-data';
+import { TITLE_OPTIONS, CUTS, CUT_ID_DEFAULT, type CutId } from './script-data';
 
 /** The long-film funnel line every Short's description closes with. */
 export const FILM_TITLE = 'The Evergreen Fund Liquidity Trap — What "Semi-Liquid" Really Means';
@@ -183,13 +183,31 @@ export function shippingLadder(startDateISO: string, weeks = 3): LadderRow[] {
   return rows;
 }
 
-/** The film's own upload metadata (the long-form side of the funnel). */
+/** The film's own upload metadata (the long-form side of the funnel).
+ *  ── 100-JUDGE VISUAL AUDIT (defect D-33 — A 26-MINUTE FIRST UPLOAD): the
+ *  kit now carries the SHIPPING ORDER as data: the FIRST-UPLOAD cut ships
+ *  first (the panel's endorsement — "a first video must earn the long
+ *  cut"), the extended cut is the earned follow-up. buildShortsKit's
+ *  funnel copy points at the shipping cut's argument, not a 26-minute
+ *  ask on a cold channel. */
 export function filmUploadKit() {
+  const first = CUTS['first-upload'];
+  const full = CUTS['full'];
   return {
+    shippingCut: CUT_ID_DEFAULT satisfies CutId,
+    shippingCutLabel: first.label,
+    shippingCutNote: first.note,
+    firstUploadChapters: first.script.map((c) => c.title),
+    earnedFollowUp: {
+      cut: 'full' as CutId,
+      label: full.label,
+      note: full.note,
+      gate: 'ship when the first cut has earned it (retention + subs baseline)',
+    },
     titleOptions: TITLE_OPTIONS,
     recommendedTitle: TITLE_OPTIONS[1],
     descriptionHook: FILM_HOOK,
-    chapters: 'the film\u2019s nine chapter cards are the YouTube chapters',
+    chapters: "the shipping cut's chapter cards are the YouTube chapters",
     tags: BASE_TAGS,
   };
 }

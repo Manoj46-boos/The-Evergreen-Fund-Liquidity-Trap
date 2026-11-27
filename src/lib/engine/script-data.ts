@@ -1366,3 +1366,35 @@ export const FIRST_UPLOAD_CUT: ChapterSpec[] = [
 export function totalBeats(): number {
   return SCRIPT.reduce((n, c) => n + c.beats.length, 0);
 }
+
+// ── 100-JUDGE VISUAL AUDIT (defect D-33 — A 26-MINUTE FIRST UPLOAD) ────────
+// "The full cut is 26.4 minutes with the D-07 repetition sitting mid-film.
+// The repository already builds a FIRST_UPLOAD_CUT of 10-12 minutes — the
+// panel endorses shipping that cut first. A first video must earn the long
+// cut; shipping the longest version first risks burying the channel's
+// best asset on its worst retention curve."
+//
+// THE SHIPPING ORDER IS NOW THE MODULE'S OWN LAW: SHIPPING_CUT is the
+// default render/upload target (the offline pipeline reads it — precache,
+// render-chapter and render-master all default to it; --cut full opts back
+// into the extended cut once the first video has earned it). The studio
+// still stages the full film for editing; the SHIP order is the cut.
+export type CutId = 'first-upload' | 'full';
+
+/** D-33: the cut the pipeline ships by default. */
+export const CUT_ID_DEFAULT: CutId = 'first-upload';
+
+export const SHIPPING_CUT: ChapterSpec[] = FIRST_UPLOAD_CUT;
+
+export const CUTS: Record<CutId, { script: ChapterSpec[]; label: string; note: string }> = {
+  'first-upload': {
+    script: FIRST_UPLOAD_CUT,
+    label: 'FIRST-UPLOAD CUT',
+    note: 'ships FIRST — the cold open + the structural shift + the audit + the conclusion (the panel-endorsed first video)',
+  },
+  full: {
+    script: SCRIPT,
+    label: 'EXTENDED CUT',
+    note: 'the full 26.4-minute film — ships after the first cut earns it',
+  },
+};

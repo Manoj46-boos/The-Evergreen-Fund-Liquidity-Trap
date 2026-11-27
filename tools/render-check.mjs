@@ -1056,9 +1056,60 @@ function iou(a, b) {
   }
 }
 
+// ── A-5 GATE — THE HAND-DWELL RULE (panel acceptance: "at least 40% of
+// each beat duration has the hand inside the hero object's bounding box"):
+// every beat that STAGES a contact verb is sampled across its own duration
+// (30/55/75/92%); at each sample the drawn hand rect (cls 'contact') must
+// intersect the declared contact object's rect. The dwell fraction must
+// clear 40% — a contact that only touches in a passing frame is a gesture,
+// not a staged verb.
+let dwellViolations = 0;
+if (guard) {
+  const { guardContactIds } = require(path.join(BUILD, 'collision.js'));
+  const inter = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const dwells = [];
+  for (const b of tl.beats) {
+    const span = b.endMs - b.startMs;
+    const samples = [0.30, 0.55, 0.75, 0.92].map((f) => Math.round(b.startMs + span * f));
+    let staged = 0, hits = 0;
+    for (const tS of samples) {
+      guard.resetGuard(`dwell@${b.beat.scene.sceneKey}@${tS}`);
+      drawFrame(ctx, tl, tS, OPTS);
+      const allIds = guardContactIds();
+      // the stage furniture's always-on desk-rule ids (the walkAcross verb's
+      // objects) are NOT a beat's staged contact — they exist on every frame
+      // of every host-family scene and would mark unstaged beats as staged.
+      const ids = allIds.filter((id) => !id.startsWith('deskRule@'));
+      if (!ids.length) continue;
+      staged++;
+      const rects = guardRects();
+      // the hand rect: solved contacts register 'contact@…'; pointAt
+      // fingertips (the scene-space target solve) register 'point@…'
+      const hands = rects.filter((r) => r.cls === 'contact'
+        && (r.id.startsWith('contact@') || r.id.startsWith('point@')));
+      const objects = rects.filter((r) => allIds.includes(r.id));
+      if (hands.length && objects.length && hands.some((h) => objects.some((o) => inter(h, o)))) hits++;
+    }
+    if (staged >= 2) {
+      const dwell = hits / samples.length;
+      dwells.push({ key: b.beat.scene.sceneKey, type: b.beat.scene.type, dwell });
+      if (dwell < 0.4) {
+        dwellViolations++;
+        console.error(`  !! HAND-DWELL GATE — ${b.beat.scene.type}/${b.beat.scene.sceneKey}: hand inside the declared object ${Math.round(dwell * 100)}% of the beat (floor 40%) — the verb gestures instead of landing`);
+      }
+    }
+  }
+  const reported = dwells.filter((d) => d.dwell > 0);
+  if (reported.length) {
+    const worst = reported.reduce((a, b) => (a.dwell <= b.dwell ? a : b));
+    const avg = Math.round((reported.reduce((a, d) => a + d.dwell, 0) / reported.length) * 100);
+    console.log(`  [a5 hand-dwell] ${reported.length} staged beats · avg dwell ${avg}% · worst ${worst.type}/${worst.key} ${Math.round(worst.dwell * 100)}% (floor 40%)`);
+  }
+}
+
 if (guardViolations || metricViolations || scaleViolations || propViolations || occupancyViolations || valueViolations || feedViolations
-  || silhouetteViolations || faceSemanticViolations || handInkViolations || motionViolations || anchorViolations) {
-  console.error(`\n✗ RENDER CHECK FAILED: ${guardViolations} collision(s), ${metricViolations} metric violation(s), ${scaleViolations} scale-law violation(s), ${propViolations} prop-ledger violation(s), ${occupancyViolations} occupancy violation(s), ${valueViolations} value-mass violation(s), ${feedViolations} feed-density violation(s), ${silhouetteViolations} silhouette(s), ${faceSemanticViolations} face-semantic(s), ${handInkViolations} hand-ink(s), ${motionViolations} motion(s), ${anchorViolations} anchor(s) — fix the scene layout before rendering.`);
+  || silhouetteViolations || faceSemanticViolations || handInkViolations || motionViolations || anchorViolations || dwellViolations) {
+  console.error(`\n✗ RENDER CHECK FAILED: ${guardViolations} collision(s), ${metricViolations} metric violation(s), ${scaleViolations} scale-law violation(s), ${propViolations} prop-ledger violation(s), ${occupancyViolations} occupancy violation(s), ${valueViolations} value-mass violation(s), ${feedViolations} feed-density violation(s), ${silhouetteViolations} silhouette(s), ${faceSemanticViolations} face-semantic(s), ${handInkViolations} hand-ink(s), ${motionViolations} motion(s), ${anchorViolations} anchor(s), ${dwellViolations} hand-dwell(s) — fix the scene layout before rendering.`);
   process.exit(1);
 }
 

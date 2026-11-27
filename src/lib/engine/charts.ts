@@ -1097,11 +1097,17 @@ export function dotGrid(
     h: number;
     total: number;
     highlight: number;
+    /** A-2 (the gold-band pin): the highlight window's FIRST index. The
+     *  ten gold dots (and the scene's highlight band) relocate to the
+     *  field's top-right corner — inside the presenter's arm envelope —
+     *  so the band becomes a palm-pinned prop instead of a 1,300px-away
+     *  refusal. Default 0 (the legacy row-0 left corner). */
+    highlightFrom?: number;
     p: number;
     t: number;
   }
 ): void {
-  const { x, y, w, h, total, highlight, p, t } = opts;
+  const { x, y, w, h, total, highlight, highlightFrom = 0, p, t } = opts;
   // v10.1: the dot field is CONTENT — the host-vs-content guard asserts the
   // side host's body envelope never plates the data field.
   registerRect(`dotGrid:field@${Math.round(x)}`, x, y, w, h);
@@ -1119,7 +1125,7 @@ export function dotGrid(
     if (appear <= 0) continue;
     const cx = x + col * cw + cw / 2;
     const cy = y + row * chh + chh / 2;
-    const isHi = idx < highlight;
+    const isHi = idx >= highlightFrom && idx < highlightFrom + highlight;
     const pop = 1 + Math.sin(appear * Math.PI) * 0.6;
     // v9 (report P0-6): highlighted dots render 1.7× — at 1.0× with a 0.18
     // pulse the ten gold dots were indistinguishable from the 490 grey ones

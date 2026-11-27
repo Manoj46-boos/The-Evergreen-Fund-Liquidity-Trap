@@ -50,13 +50,27 @@ if (!fs.existsSync(path.join(BUILD, 'director.js'))) {
   );
 }
 
+// D-33: the SHIPPING DEFAULT is the FIRST-UPLOAD cut — the panel endorsed
+// shipping the 10-12-minute cut first (--cut full renders the extended cut
+// once the first video has earned it). The cut swaps the module's SCRIPT
+// before the timeline builds, and reads the matching measured manifest.
+const CUT = arg('cut', 'first-upload');
+const sd = require(path.join(BUILD, 'script-data.js'));
+let manifestFile = 'manifest.json';
+if (CUT === 'first-upload' && sd.FIRST_UPLOAD_CUT) {
+  sd.SCRIPT = sd.FIRST_UPLOAD_CUT;
+  manifestFile = fs.existsSync(path.join(REPO, '.render-assets', 'manifest-first.json'))
+    ? 'manifest-first.json'
+    : 'manifest.json'; // the full manifest also carries the cut's lines (same TTS cache)
+}
 const { buildTimeline } = require(path.join(BUILD, 'timeline.js'));
 const { chapterChunks } = require(path.join(BUILD, 'encode.js'));
-const manifest = JSON.parse(fs.readFileSync(path.join(REPO, '.render-assets', 'manifest.json'), 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(path.join(REPO, '.render-assets', manifestFile), 'utf8'));
 const tl = buildTimeline(manifest, FPS);
 const chunks = chapterChunks(tl);
+const cutTag = CUT === 'first-upload' ? 'FIRST-UPLOAD' : 'FULL';
 
-console.log(`master plan: ${chunks.length} chapter chunks · film ${(tl.durationMs / 60000).toFixed(1)} min · ${FPS} fps · CRF ${CRF}`);
+console.log(`master plan (cut: ${CUT} — ${cutTag}): ${chunks.length} chapter chunks · film ${(tl.durationMs / 60000).toFixed(1)} min · ${FPS} fps · CRF ${CRF}`);
 chunks.forEach((c) =>
   console.log(`  chunk ${String(c.index).padStart(2, '0')} ${c.chapterId}  ${(c.startMs / 1000).toFixed(1)}s → ${(c.endMs / 1000).toFixed(1)}s  (${((c.endMs - c.startMs) / 1000).toFixed(1)}s)`)
 );
@@ -65,7 +79,7 @@ fs.mkdirSync(MUXDIR, { recursive: true });
 const t0 = Date.now();
 for (const c of chunks) {
   if (c.index < fromChunk || c.index > toChunk) continue;
-  const outFile = path.join(MUXDIR, `chunk-${String(c.index).padStart(2, '0')}-${c.chapterId}.mp4`);
+  const outFile = path.join(MUXDIR, `chunk-${cutTag}-${String(c.index).padStart(2, '0')}-${c.chapterId}.mp4`);
   if (fs.existsSync(outFile) && !arg('force')) {
     console.log(`chunk ${c.index} exists — skip (use --force to re-render)`);
     continue;
@@ -75,7 +89,7 @@ for (const c of chunks) {
     process.execPath,
     ['--max-old-space-size=4096',
      path.join(REPO, 'scripts', 'render-chapter.mjs'),
-     '--chapter', String(c.index), '--fps', String(FPS), '--crf', String(CRF)],
+     '--chapter', String(c.index), '--fps', String(FPS), '--crf', String(CRF), '--cut', CUT],
     { stdio: 'inherit', cwd: REPO, env: process.env }
   );
   if (r.status !== 0) {
@@ -89,7 +103,7 @@ console.log(`\nchunks done in ${((Date.now() - t0) / 1000 / 60).toFixed(1)} min`
 const listFile = path.join(MUXDIR, 'concat-list.txt');
 const parts = chunks
   .filter((c) => c.index >= fromChunk && c.index <= toChunk)
-  .map((c) => path.join(MUXDIR, `chunk-${String(c.index).padStart(2, '0')}-${c.chapterId}.mp4`));
+  .map((c) => path.join(MUXDIR, `chunk-${cutTag}-${String(c.index).padStart(2, '0')}-${c.chapterId}.mp4`));
 for (const p of parts) {
   if (!fs.existsSync(p)) {
     console.error(`missing chunk ${p} — render it first (npm run master:chunk -- --from ${path.basename(p).slice(6, 8)})`);
@@ -97,7 +111,7 @@ for (const p of parts) {
   }
 }
 fs.writeFileSync(listFile, parts.map((p) => `file '${p}'`).join('\n'));
-const master = path.join(MUXDIR, 'the-evergreen-fund-liquidity-trap-1080p.mp4');
+const master = path.join(MUXDIR, `the-evergreen-fund-liquidity-trap-1080p-${cutTag}.mp4`);
 execFileSync(
   'ffmpeg',
   ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', master],

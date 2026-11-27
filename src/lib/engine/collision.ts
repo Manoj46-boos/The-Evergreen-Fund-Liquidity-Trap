@@ -262,6 +262,13 @@ export function guardRects(): Array<GuardRect & { id: string; cls?: 'content' | 
 
 /** Compute (and stash) all violations for the current frame:
  *  pill + fixed-furniture overlaps, and frame-edge crossings. */
+/** A-5 (THE HAND-DWELL GATE): the frame's declared contact ids — the
+ *  harness samples each staged beat and asserts the hand rect spends
+ *  >= 40% of the beat duration INSIDE the declared object's rect. */
+export function guardContactIds(): string[] {
+  return collisionGuard.enabled ? Array.from(collisionGuard.contactIds) : [];
+}
+
 export function collectViolations(): CollisionViolation[] {
   const g = collisionGuard;
   if (!g.enabled) return [];

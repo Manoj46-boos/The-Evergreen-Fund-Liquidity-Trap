@@ -95,23 +95,32 @@ const KNOWN_DEAD: Record<string, string> = {
  *
  * Verbs (the sanctioned ownership grammar):
  *   held        — the prop rides a hand (the mug, the satchel strap)
- *   palm        — the hand rests ON the object (cards, chips, racks, pump)
+ *   palm        — the hand rests ON the object (cards, chips, racks, pump,
+ *                 the stamp plate press, the gold-band pin)
  *   tap         — the hand touches the object's surface (gauge rim, dial)
  *   fist        — the hand grips the object (bar caps, the K's stem)
  *   bracket     — the hand brackets/borders the object (underline cap,
  *                 definition card edge)
  *   fired-by    — the object is EMITTED by the owned thing (coin flows)
  *   pointed-at  — the gesture cone owns the object (chips, bubbles, tags)
- *   refusal     — the deliberate crossed-arm stance owns the data beat
- *                 (the sanctioned non-contact verb)
  *   pushed      — the hand MOVES the object along a rail to a docking
  *                 point (U-02's sanction for the former bare-underline
  *                 push; a pushed prop may only touch NUMERALS, CARD
  *                 EDGES or CHART POINTS — never open space)
+ *
+ * A-2 (100-JUDGE VISUAL AUDIT — EVERY "REFUSAL" VERB CONVERTED TO CONTACT):
+ * the former `refusal` verb — the sanctioned non-contact stance — is
+ * RETIRED from the grammar. Its two live entries (the stampCard plate and
+ * the dotGrid gold band) are now CONTACT entries: the stampCard host
+ * presses the plate with both palms on the slam clock; the dotGrid host
+ * pins the gold band with his palm. The scene drawers implement the
+ * contact (scenes-text.ts / scenes-data.ts); this registry no longer
+ * sanctions a prop no hand can reach — every staged prop is held, palmed,
+ * tapped, gripped, bracketed, fired or pushed.
  */
 export type PropVerb =
   | 'held' | 'palm' | 'tap' | 'fist' | 'bracket'
-  | 'fired-by' | 'pointed-at' | 'refusal' | 'pushed';
+  | 'fired-by' | 'pointed-at' | 'pushed';
 
 export interface PropOwnership {
   prop: string;
@@ -146,7 +155,10 @@ export const PROP_OWNERSHIP: PropOwnership[] = [
   // ── fired-by (emission flows) ───────────────────────────────────────────
   { prop: 'ownerWorker coin flow', owner: 'fired from the worker\u2019s plateau, landing on the owner\u2019s rise', verb: 'fired-by', where: 'ownerWorker' },
   { prop: 'gas pump shorts coins', owner: 'fired from the pump\u2019s $/GAL display', verb: 'fired-by', where: 'shorts/pump' },
-  // ── pointed-at / annotated ──────────────────────────────────────────
+  // ── held (A-3 — the carried props) ─────────────────────────────────────
+  { prop: 'redemption payout coin', owner: 'flowLiquidity gate host (near palm \u2014 the payout at the window)', verb: 'held', where: 'flowLiquidity' },
+  { prop: 'the gap arrow (navGap)', owner: 'navGap mounted host (fingertip-anchored \u2014 the annotation becomes his prop)', verb: 'held', where: 'navGap' },
+  // ── pointed-at / annotated ──────────────────────────────────────
   { prop: 'worker paycheck arrow', owner: 'the worker\u2019s flat run (terminal mark, coral tag names it)', verb: 'pointed-at', where: 'ownerWorker' },
   { prop: 'comment bubbles', owner: 'the commentPrompt host\u2019s gesture cone (the field he invites)', verb: 'pointed-at', where: 'commentPrompt' },
   { prop: 'recession debates cards', owner: 'the gauge host\u2019s gesture cone + gaze', verb: 'pointed-at', where: 'recessionGauge' },
@@ -157,9 +169,16 @@ export const PROP_OWNERSHIP: PropOwnership[] = [
   { prop: 'desk stack (ledger sheets + pen cup)', owner: 'the host-family stage\u2019s left-foot furniture \u2014 the presenting host\u2019s reachable set piece', verb: 'pointed-at', where: 'host family (stage.ts set piece)' },
   { prop: 'charts-on-desk (chart card + bars)', owner: 'the data-family stage\u2019s left-foot furniture \u2014 the presenting host\u2019s reachable set piece', verb: 'pointed-at', where: 'data family (stage.ts set piece)' },
   { prop: 'ledger folio (statement receipt book)', owner: 'the statement-family stage\u2019s left-foot furniture \u2014 the type owns the frame; the folio is the room\u2019s touchable object', verb: 'pointed-at', where: 'statement family (stage.ts set piece)' },
-  // ── refusal (the sanctioned non-contact verb) ───────────────────────────
-  { prop: 'dot-grid gold band (10 of 500)', owner: 'dotGrid host \u2014 crossed arms + committed gaze (1,300px from any reachable staging)', verb: 'refusal', where: 'dotGrid' },
-  { prop: 'stamp plate (RECORD HIGHS)', owner: 'stampCard host \u2014 the assent nod; the plate is a top-band object no grounded host can reach', verb: 'refusal', where: 'stampCard' },
+  // ── contact verbs (A-2 — the former `refusal` entries, converted) ──────
+  // The stampCard host PRESSES the plate: both palms land on the plate's
+  // left band on the slam clock (scenes-text.ts stampCardScene implements
+  // the press — the pose window + the solved contact).
+  { prop: 'stamp plate (RECORD HIGHS)', owner: 'stampCard host (both palms on the slam clock)', verb: 'palm', where: 'stampCard' },
+  // The dotGrid host PINS the gold band: the highlight band relocates to
+  // the field's top-right corner (the ten gold dots ride with it) and the
+  // host's palm lands ON the band's right edge (scenes-data.ts
+  // dotGridScene implements the pin).
+  { prop: 'dot-grid gold band (10 of 500)', owner: 'dotGrid host (near palm pins the band)', verb: 'palm', where: 'dotGrid' },
   // ── pushed (U-02 — the sanctioned push): the hand MOVES a payload along
   // a rail to a CONTENT docking point. A pushed prop may only touch
   // NUMERALS, CARD EDGES or CHART POINTS — never open space. The former
@@ -171,7 +190,7 @@ export const PROP_OWNERSHIP: PropOwnership[] = [
   { prop: 'pushed ledger row (quote foot rule)', owner: 'the quoteCard host’s near palm — the row slides the foot rule and docks at the icon stamp (card edge)', verb: 'pushed', where: 'quoteCard' },
 ];
 
-const VERBS: PropVerb[] = ['held', 'palm', 'tap', 'fist', 'bracket', 'fired-by', 'pointed-at', 'refusal', 'pushed'];
+const VERBS: PropVerb[] = ['held', 'palm', 'tap', 'fist', 'bracket', 'fired-by', 'pointed-at', 'pushed'];
 
 /** Validate the ownership registry itself (dev-time, prepare-time). */
 export function validatePropOwnership(): string[] {
