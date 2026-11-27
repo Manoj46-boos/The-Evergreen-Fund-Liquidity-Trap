@@ -483,6 +483,40 @@ export class Stickman {
         const up = blendPose(prevPose, cycTarget, fUp);
         const lo = blendPose(prevPose, cycTarget, fLo);
         pose = { ...up, lAL: lo.lAL, rAL: lo.rAL };
+        // ── 100-JUDGE VISUAL AUDIT (defect D-20 — POSES TELEPORT) ────────────
+        // The sentence spring moved ARM ANGLES while the body stayed planted:
+        // "at feed scale the arms swap between held positions while the body
+        // stays planted … weight, timing and personality are exactly what
+        // this system was built to add, and exactly what the viewer does not
+        // receive." THE WEIGHT TRANSFER: the body participates in every
+        // gesture transition, driven by the SAME spring clock (zero at both
+        // endpoints — pose continuity is exact; pure f(t, sentence data)):
+        //   • the PELVIS rocks toward the gesture side mid-transition (the
+        //     hip settle a real weight shift needs),
+        //   • the LEGS counterbalance — the loaded leg straightens under the
+        //     weight, the free leg eases (the reach needs a counter-lean),
+        //   • the root ABSORBS — a 2.6px dip as the weight lands mid-spring,
+        //     rising into the target pose's own rootY,
+        //   • the HEAD leads the take — the yaw turns toward the new gesture
+        //     ahead of the torso (the head-lead the accent already uses).
+        {
+          const dArmR = Math.abs(cycTarget.rAU - prevPose.rAU) + Math.abs(cycTarget.rAL - prevPose.rAL);
+          const dArmL = Math.abs(cycTarget.lAU - prevPose.lAU) + Math.abs(cycTarget.lAL - prevPose.lAL);
+          const side = dArmR >= dArmL ? 1 : -1; // +1 = the gesture rides the right arm
+          const wSpring = Math.max(fUp, stNow > swapAt ? clamp01(springTo(0, 1, stNow - swapAt, 480, 11)) : 0);
+          const bodyK = Math.sin(Math.PI * clamp01(wSpring)); // zero at both endpoints
+          pose = {
+            ...pose,
+            pelvisTilt: (pose.pelvisTilt ?? 0) + side * 4.5 * bodyK,
+            // the loaded leg (gesture side) straightens under the weight; the
+            // free leg's knee eases — the legs CARRY the transition
+            rLU: (pose.rLU ?? 0) + (side > 0 ? -3.2 : 2.4) * bodyK,
+            lLU: (pose.lLU ?? 0) + (side > 0 ? 2.4 : -3.2) * bodyK,
+            rootY: (pose.rootY ?? 0) + 2.6 * bodyK,
+            lean: (pose.lean ?? 0) + side * 1.4 * bodyK,
+            headYaw: (pose.headYaw ?? 0) + side * 2.2 * bodyK,
+          };
+        }
         // PHASE 2 VISUAL AUDIT (Fix 1 — GESTURE ARCS): the angle-lerp above
         // carries the hand in a STRAIGHT line between poses. The motion
         // grammar: gesture springs interpolate joint POSITIONS through a

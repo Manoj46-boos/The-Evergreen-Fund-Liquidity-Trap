@@ -1255,7 +1255,16 @@ function scarfTail(
   t = 0,
   seed = 0,
   walkMul = 1,
-  talkMul = 1
+  talkMul = 1,
+  /** 100-JUDGE VISUAL AUDIT (defect D-23 — THE INVISIBLE TAIL): the rig
+   *  scale the caller draws at. The tail's taper widths are LOCAL units —
+   *  below rig 1.7 the 3.2-unit tip rendered under 2px on screen and at
+   *  the 320px feed it vanished entirely ("the scarf tail exists in code
+   *  but is invisible below rig 1.5"). The widths floor against the rig:
+   *  every stroke keeps ≥ 8.4px of SCREEN width (1.4px at the feed — the
+   *  perception floor for a moving accent line), capped at 2.2× so small
+   *  rigs never draw a rope. */
+  drawScale = 2.65
 ): void {
   // P1 scarf v3 (100-judge dossier): the old 42/33/21-unit chest-length
   // ribbon hung DOWN the front of the gold torso and merged with it — the
@@ -1288,16 +1297,19 @@ function scarfTail(
   const [fp, tp] = followChain(t, seed, anchor, { x: -14 / rl, y: 5 / rl }, 17, 14, -0.0002, 0.0011, 0.86);
   const fxp = fp.x, fyp = fp.y;       // the fold — chain node 1
   const ex = tp.x, ey = tp.y;         // the tip — chain node 2
+  // D-23: the width floor — the tail survives every rig the film stages
+  // (screen px = local × drawScale ≥ 8.4px, i.e. 1.4px at the feed gate).
+  const wFloor = Math.max(1, Math.min(2.2, 2.625 / drawScale));
   // ONE continuous tapered ribbon — root segment then fold segment,
   // round caps at the fold so the crease reads as cloth bending.
-  taper(ctx, x0, y0, fxp, fyp, 8.5, 6, colUnder);
-  taper(ctx, fxp, fyp, ex, ey, 6, 3.8, colUnder);
-  taper(ctx, x0, y0, fxp, fyp, 7.2, 5, colTop);
-  taper(ctx, fxp, fyp, ex, ey, 5, 3.2, colTop);
+  taper(ctx, x0, y0, fxp, fyp, 8.5 * wFloor, 6 * wFloor, colUnder);
+  taper(ctx, fxp, fyp, ex, ey, 6 * wFloor, 3.8 * wFloor, colUnder);
+  taper(ctx, x0, y0, fxp, fyp, 7.2 * wFloor, 5 * wFloor, colTop);
+  taper(ctx, fxp, fyp, ex, ey, 5 * wFloor, 3.2 * wFloor, colTop);
   // the fold crease — the one seam a real scarf HAS (the two-tone hint
   // at the bend, in the under colour)
   ctx.strokeStyle = rgba(colUnder, 0.85);
-  ctx.lineWidth = STROKE.hairline; // U-16 ink law: under-bend hairline
+  ctx.lineWidth = STROKE.hairline * wFloor; // U-16 ink law: under-bend hairline
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(fxp - 3, fyp - 1.2);
@@ -2129,6 +2141,21 @@ export function drawStickmanV2(
   // shoulder and draws BEFORE the torso — the body occludes the root, the
   // cloth reads as worn AROUND the neck, and the gold bib read dies. The
   // wave is damped 0.5x: a short tail flicks, it does not whip.
+  // 100-JUDGE VISUAL AUDIT (defect D-23 — THE INVISIBLE TAIL): "the scarf
+  // tail exists in code but is invisible below rig 1.5." Two causes, both
+  // fixed here: (1) the rig-1.7 gate removed the tail entirely below the
+  // hero band; (2) at side rigs the torso capsule's shoulder mass covers
+  // the whole back-escaping ribbon, so even an ungated under-torso draw
+  // yields zero visible pixels (pixel-verified). The register splits:
+  //   hero rigs (≥1.7) — the certified behind-torso read (the flick
+  //     escapes beyond the shoulder line; root occluded, tip visible);
+  //   side rigs (<1.7) — the tail draws OVER the torso (the knot then
+  //     covers its root): the short tapered ribbon reads as cloth lying at
+  //     the shoulder, the width floor keeps ≥8.4px screen (1.4px at the
+  //     feed), and the strap read stays dead (the ribbon is 31 units,
+  //     back-escaping — it never crosses the chest).
+  let scarfWave0 = 0;
+  let scarfTalkMul = 1;
   if (r.scarf !== false && !prof) {
     const talkEnv0 = r.talk ?? 0;
     // PHASE-5 (report §11 Phase 5 — LET THE BODY ACT): the standing wave
@@ -2137,27 +2164,14 @@ export function drawStickmanV2(
     // wave REGISTERs: the scarf is worn, alive, brand-motion.
     // B3 RE-SPEC: the short shoulder flick answers the body's clocks at a
     // 10px register — cloth-alive without whipping a ribbon this short.
-    const wave0 =
+    scarfWave0 =
       Math.sin(t / 700 + seed) * 10 * (r.walkPhase !== undefined ? 3.2 : 1) * (1 + talkEnv0 * 1.4) +
       Math.sin(t / 240 + seed * 2) * 3.2 * talkEnv0;
-    // P1 U3 (RETIRE THE STRAP READ): at side rigs the tail is noise —
-    // the audit draws ONLY THE KNOT below the hero band. The gate rises
-    // 1.2 → 1.7: the flick exists at the hero/presenting registers where
-    // its 3.2px tip survives; below, the knot + collar break carry the
-    // brand (the knot draws at all scales — see the gold knot block).
-    // 100-JUDGE AUDIT (defect D-18 — NO FEED-READABLE SIGNATURE SILHOUETTE):
-    // at 320px the steel scarf (#31436B on the #13254B room) compressed into
-    // "dark torso on light head" — the two-tone outfit the design system
-    // describes was not distinguishable at the gate. The scarf joins the
-    // film's BRASS register (the pocket square and lapel gold it was designed
-    // to answer): the collar now carries a mid-tone accent that survives the
-    // feed downsample, and the silhouette names itself — ivory head, brass
-    // collar, tailored navy body — in three seconds at phone scale.
+    scarfTalkMul = 1 + talkEnv0 * 1.4;
     if (scale >= 1.7) {
-      scarfTail(ctx, neckX - 3, neckY + 12, wave0 * 0.5, PALETTE.gold, PALETTE.goldDeep,
-        t, seed, r.walkPhase !== undefined ? 3.2 : 1, 1 + talkEnv0 * 1.4);
+      scarfTail(ctx, neckX - 3, neckY + 12, scarfWave0 * 0.5, PALETTE.gold, PALETTE.goldDeep,
+        t, seed, r.walkPhase !== undefined ? 3.2 : 1, scarfTalkMul, scale);
     }
-    // (no sub-gate stroke: knot-only below 1.7, per the audit)
   }
   {
     const tx0 = 0, ty0 = pelvisY + 4, tx1 = neckX, ty1 = neckY;
@@ -2353,6 +2367,17 @@ export function drawStickmanV2(
     ctx.fillStyle = rgba(PALETTE.goldDeep, 0.5);
     ctx.fillRect(-bandW * 0.85, 4, bandW * 1.7, 2);
     ctx.restore();
+  }
+
+  // D-23 (continued): the SIDE-RIG tail — drawn OVER the torso (the torso
+  // capsule's shoulder mass fully covered the under-torso ribbon at these
+  // rigs; pixel-verified zero-diff). The knot block below covers the
+  // ribbon's root, so the read stays "worn around the neck": a short gold
+  // flick escaping back over the shoulder line, width-floored to survive
+  // the feed. Hero rigs keep the certified behind-torso read above.
+  if (r.scarf !== false && !prof && scale < 1.7) {
+    scarfTail(ctx, neckX - 3, neckY + 12, scarfWave0 * 0.5, PALETTE.gold, PALETTE.goldDeep,
+      t, seed, r.walkPhase !== undefined ? 3.2 : 1, scarfTalkMul, scale);
   }
 
   // AUDIT-2 / 1.4 (report §10.2, C6) — THE COLLAR BREAK. The gold knot

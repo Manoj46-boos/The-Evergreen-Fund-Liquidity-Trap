@@ -174,6 +174,26 @@ export function strokeW(k: StrokeKind): number {
  *  gate (≈5.7px) where 28px (4.7px) did not. */
 export const LABEL_FLOOR = 34;
 
+// ── 100-JUDGE VISUAL AUDIT (defect D-27 — THE NUMBER SCALE LAW) ──────────────
+// "Stat numerals appear at 120px (statReveal), 84px (commentPrompt), 56px
+// chips and 34px labels — there is no single scale law for 'the number that
+// owns the frame'. Weak hierarchy = weak glance comprehension." The law:
+// ONE register per hierarchy rank, exported here, consumed by every scene
+// that draws a numeral. Nothing else in the engine hand-tunes these.
+//   hero — THE number that owns the frame: the one numeral the beat is
+//          about (statReveal's cold-open slots, caseFiles read-out cells).
+//   sub  — supporting numerals in multi-cell / multi-row layouts (caseFiles
+//          dossier rows, the barsCompare flip counter) and the frame-owning
+//          display type that is not a numeral (the comment prompt).
+//   chip — numerals borne by chip/plated elements (the statement frames'
+//          data chip). Label TEXT keeps the LABEL_FLOOR law (34) — it is
+//          glanceable identifier, not a numeral rank.
+export const NUM = {
+  hero: 120,
+  sub: 84,
+  chip: 56,
+} as const;
+
 /** Dev-mode warning sink for floor violations (the studio can surface it). */
 export function typeFloorWarn(site: string, size: number): void {
   if (process.env.NODE_ENV !== 'production' && typeof console !== 'undefined') {
@@ -416,6 +436,13 @@ export function chip(
     weight?: 300 | 400 | 600 | 700;
     alpha?: number;
     iconDot?: string;
+    /** 100-JUDGE VISUAL AUDIT (defect D-22 — CHIPS ENTER WITH A WIND-UP):
+     *  the chip's RAW entrance progress 0..1 (before its own ease). When
+     *  supplied and < 0.22, the chip COILS 10px along its approach axis
+     *  (rightward — chips land left→right in this film's layouts) and
+     *  drops 2px, then releases. Omitted = the chip draws at rest (the
+     *  legacy behavior — alpha-only callers keep their certified layouts). */
+    enter?: number;
   } = {}
 ): number {
   const {
@@ -428,15 +455,24 @@ export function chip(
     weight = 600,
     alpha = 1,
     iconDot,
+    enter,
   } = opts;
   ctx.save();
   ctx.globalAlpha = alpha;
+  // D-22: the chip's wind-up — the coil rides the raw progress (zero at
+  // p=0.22; pure f(p); the registerRect below tracks the COILED position
+  // so the guard sees exactly what draws).
+  let wu = 0;
+  if (enter !== undefined && enter > 0 && enter < 0.22) {
+    wu = Math.sin((enter / 0.22) * Math.PI);
+  }
+  if (wu > 0) ctx.translate(10 * wu, 2 * wu);
   setFont(ctx, size, weight);
   const tw = ctx.measureText(text).width;
   const dotW = iconDot ? size * 0.9 + 10 : 0;
   const w = tw + padX * 2 + dotW;
   const h = size + padY * 2;
-  registerRect(`chip:${text.slice(0, 14)}`, x, y, w, h);
+  registerRect(`chip:${text.slice(0, 14)}`, x + 10 * wu, y + 2 * wu, w, h);
   // the chip shadow joins the one-light rule (−5, +7) — vault black
   ctx.fillStyle = rgba(PALETTE.shadow, 0.4);
   roundRect(ctx, x - 5, y + 7, w, h, h / 2);

@@ -254,3 +254,60 @@ export function landPulse(dt: number, riseMs = 66, decayMs = 160): number {
   if (dt <= riseMs) return 1 - easeOutCubic(dt / riseMs) * 0.25; // the held impact
   return (1 - easeInOutSine((dt - riseMs) / decayMs)) * 0.75;
 }
+
+/**
+ * 100-JUDGE VISUAL AUDIT (defect D-21 — SQUASH AND STRETCH ONLY EXIST ON
+ * FOOTFALLS): the film's real impacts — stamp slams, the % landing, bar
+ * arrivals, dossier flaps — scaled with ZERO volume deformation, the
+ * "single clearest cheap-work tell at hero moments". `impactSquash` is the
+ * shared volume envelope every such impact now consumes: a volume-
+ * preserving deform (the object flattens INTO its impact line, then
+ * recovers through a stretch counter-bounce), keyed to dt = t − landT.
+ *   0..130ms   the squash — sin(π·dt/130), full amp at 65ms
+ *   130..360ms the recovery — a 0.32-amp stretch counter-bounce (the
+ *              volume swings the other way, exactly like the walk's
+ *              strike/push pair)
+ * Zero at both ends and outside the window → pose/render continuity is
+ * exact; pure f(dt), scrub-safe. Callers scale it: scaleX = 1 + k·sq,
+ * scaleY = 1 − 1.3k·sq (volume preserved ≈ 1 + k − 1.3k < 1 by design —
+ * the impact reads as mass arriving, not a balloon).
+ */
+export function impactSquash(dt: number): number {
+  if (dt < 0 || dt > 360) return 0;
+  if (dt <= 130) return Math.sin((dt / 130) * Math.PI);
+  return -0.32 * Math.sin(((dt - 130) / 230) * Math.PI);
+}
+
+/**
+ * 100-JUDGE VISUAL AUDIT (defect D-23 — NO FOLLOW-THROUGH ON PROPS):
+ * "cards land on easeOutCubic and stop dead". `landSettle` is the
+ * follow-through half the objects were missing: a decaying 2-arc wobble
+ * the caller applies as a ±dy settle (and optionally a ±0.3° rock) AFTER
+ * the landing envelope completes. dt = t − landT:
+ *   the object overshoots its rest by +amp·e^(−dt/260)·sin(2π·dt/260)
+ *   — one visible up-bounce (~130ms after landing), one smaller
+ *   counter-bounce (~260ms), settled to sub-0.1px by ~700ms.
+ * Zero outside the window; pure f(t); the easeOutCubic arrival stays
+ * untouched — the settle rides on top so continuity is exact.
+ */
+export function landSettle(dt: number): number {
+  if (dt < 0 || dt > 700) return 0;
+  return Math.exp(-dt / 260) * Math.sin((dt / 260) * 2 * Math.PI);
+}
+
+/**
+ * 100-JUDGE VISUAL AUDIT (defect D-22 — ANTICIPATION SCOPED TO ONE SCENE
+ * TYPE): the 700ms recoil ran on bigText only; stat numerals, bars and
+ * chips entered with no wind-up anywhere else. `windUp` is the shared
+ * pre-arrival counter-move: given the RAW entrance progress p (0..1,
+ * before the ease), it returns the anticipation factor — the element
+ * pulls AWAY from its landing (offset/scale/width terms multiply this)
+ * for the first 22% of the window, then hands off to the arrival ease.
+ *   p ∈ [0, 0.22) → sin(π·p/0.22)  (peak pull-back at p≈0.11)
+ *   p ≥ 0.22      → 0 (the release — the arrival ease owns the rest)
+ * Pure f(p), scrub-safe, zero at both ends.
+ */
+export function windUp(p: number): number {
+  if (p <= 0 || p >= 0.22) return 0;
+  return Math.sin((p / 0.22) * Math.PI);
+}

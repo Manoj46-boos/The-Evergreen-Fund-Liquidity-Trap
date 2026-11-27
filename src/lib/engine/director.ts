@@ -350,7 +350,14 @@ function cameraV2(
    *  the film ENDS on its host; an exit animation on the outro both crops
    *  the full-figure close-up (the lift pushed the apex band past the top
    *  edge, sweep-verified) and animates a cut to nothing. */
-  isFinalGroup = false
+  isFinalGroup = false,
+  /** 100-JUDGE VISUAL AUDIT (defect D-25 — THE HOST WALKS HIS OWN SCENE
+   *  OUT): the LEAD beat's scene type for this group (the group's first
+   *  beat, passed from drawFrame). HOST-led groups upgrade exit style 0
+   *  to the character walk-out — the camera-only lift/truck never walks
+   *  a presenter off, and the character exit keyed to groupIdx parity
+   *  sampled host groups only ~22% of the time. */
+  groupLeadType = 'host'
 ): void {
   const p = clamp01(gt / Math.max(1, groupDur));
   // scenes that present a single subject push in; comparison scenes pull out
@@ -586,6 +593,19 @@ function cameraV2(
   // The exit-lift monotony was the panel's finding: one repeated gesture
   // is not a rotation, and the visual interrupt cadence must match the
   // score's. Short groups (< 1.4s) never exit-animate (no flicker).
+  // ── 100-JUDGE VISUAL AUDIT (defect D-25 — EXITS ARE FADES) ────────────────
+  // two shipped gaps the defect names, fixed here:
+  //   1. "the host almost never walks a scene out" — the character exit
+  //      keyed to groupIdx parity, so HOST-led groups sampled it ~22% of
+  //      the time (and the 2.65 main host was walkable-guarded out of it
+  //      entirely). HOST-LED groups now take the character exit on styles
+  //      0 AND 3 (groupLeadType passed from drawFrame) — 58% coverage —
+  //      and the walkable guard opens to the full-figure host (the head
+  //      headroom check unchanged).
+  //   2. "the dead frame a fade leaves behind" — style 2's camera held
+  //      still while the wipe's alpha envelope died to zero before the
+  //      cut (a held, emptying frame). Style 2 now carries the apex-safe
+  //      truck like styles 1/3 — the frame keeps moving through the cut.
   let charExit = 0;
   if (groupDur > 1400 && !isFinalGroup) {
     const exitP = clamp01((gt - (groupDur - 420)) / 420);
@@ -598,9 +618,13 @@ function cameraV2(
     // Deterministic, scrub-safe; each style's camera behaviour is the
     // certified one (the guard sweep arbitrates the envelopes).
     const exitStyle = (((groupIdx + chapterIdx) % 4) + 4) % 4;
+    // D-25: HOST-LED groups upgrade style 0 (the camera-only lift that
+    // full-figure host scenes already decline) to the CHARACTER EXIT —
+    // the host takes his own scene out instead of the camera sliding.
+    const exitStyleEff = exitStyle === 0 && groupLeadType === 'host' ? 3 : exitStyle;
     if (exitP > 0) {
       const e = Math.pow(exitP, 1.5);
-      if (exitStyle === 0) {
+      if (exitStyleEff === 0) {
         // the house lift — lift 34px, recede 1.5%
         // PHASE 3 sweep finding: on FULL-FIGURE HOST scenes (type 'host')
         // the lift's camY pushes the registered apex band past the top
@@ -616,17 +640,21 @@ function cameraV2(
           camY -= 34 * e;
           camScale *= 1 - 0.015 * e;
         }
-      } else if (exitStyle === 1) {
+      } else if (exitStyleEff === 1) {
         // truck-out — slide 26px left, breathe out 1.2%
         camX -= 26 * easeInQuad(exitP);
         camScale *= 1 - 0.012 * exitP;
+      } else if (exitStyleEff === 2) {
+        // D-25: the K-wipe closes the scene AND the camera carries the
+        // apex-safe truck — no more held, emptying frame before the cut.
+        camX -= 26 * easeInQuad(exitP);
+        camScale *= 1 - 0.012 * exitP;
       }
-      // exitStyle 2: the K-wipe closes the scene; camera holds
-      // exitStyle 3: the character walks the scene out AND the camera
+      // exitStyleEff 3: the character walks the scene out AND the camera
       // carries the apex-safe truck — groups whose only host cannot walk
       // (perched side hosts, the close-up outro) still get a visible exit,
       // never a dead hold; walkable hosts compound the walk on top.
-      if (exitStyle === 3) {
+      if (exitStyleEff === 3) {
         charExit = e;
         camX -= 26 * easeInQuad(exitP);
         camScale *= 1 - 0.012 * exitP;
@@ -923,8 +951,12 @@ export function drawFrame(
   // reaction-shot push (sceneKey) — both deterministic in (gt, groupDur)
   const allGroups = groupsFor(tl);
   const groupIdx = allGroups.indexOf(group);
+  // D-25: the LEAD beat's type — a host-led group takes the character exit
+  // on style 0 (the walk-out), not the camera-only lift.
+  const leadBeat = group ? tl.beats[group.beatIdx] : null;
+  const groupLeadType = leadBeat ? String(leadBeat.beat.scene.type) : String(beat.beat.scene.type);
   cameraV2(ctx, W, H, gt, groupDur, beat.beat.scene.type, beat.chapter, groupIdx, beat.beat.scene.sceneKey,
-    groupIdx === allGroups.length - 1);
+    groupIdx === allGroups.length - 1, groupLeadType);
   // 1-2% scale punch that decays over 160ms right after each hard cut
   // PANEL-12 / P2-3 (report §14.3): bigText and stampCard land the film's
   // loudest words — their punch amplifies 0.035 → 0.05 so the cut itself

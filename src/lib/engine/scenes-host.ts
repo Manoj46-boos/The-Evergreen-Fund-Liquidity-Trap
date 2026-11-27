@@ -486,9 +486,18 @@ function drawHost(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
   // host (the c9-close outro runs rig ~2.9 — his head owns the frame) can
   // neither walk nor should he: the film ENDS on him. The grammar applies
   // only where the figure has the headroom and the scale a walk reads at.
-  const canWalkOut = exitCharP > 0 && scale <= 2.2 && hy - 251 * scale > 10;
+  // 100-JUDGE VISUAL AUDIT (defect D-25 — THE WALKABLE GUARD): the 2.2
+  // cap locked the walk-out to side hosts only — the film's 2.65 MAIN
+  // host never walked a scene out ("the host almost never walks a scene
+  // out"). The guard opens to the full-figure host: headroom check
+  // unchanged (the crown stays inside the top band), travel bounded by
+  // the frame edge, the cut lands as he reaches it.
+  const canWalkOut = exitCharP > 0 && scale <= 2.9 && hy - 251 * scale > 10;
   if (canWalkOut) {
-    exitWalkX = Math.min(520, 1830 - (x + 95)) * exitCharP;
+    // THE EXIT STACK YIELDS WHEN IT WOULD CROP: the travel bounds the
+    // guard's hip envelope (±88 rig units) inside the frame — the stride
+    // commits toward the edge, the cut lands before any crop.
+    exitWalkX = Math.min(520, Math.max(0, 1830 - 88 * scale - (x + 95))) * exitCharP;
     walkPhase = (walkPhase ?? 0.45) + exitCharP * 2.6;
   }
   // AUDIT-3 / §1.5 round 2 (panel: "eye-line should follow the gesture"):
@@ -1015,6 +1024,87 @@ export function hostSceneV2(g: SceneCtx): void {
   // blended AFTER the take blocks so the take's own brow terms ride on
   // top during reaction windows, and the voStyle face owns the rest.
   pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)) };
+  // ── 100-JUDGE VISUAL AUDIT (defect D-24 — IDLE LIFE IS BOILERPLATE) ───────
+  // "the hold carries line boil, a weight shift and a re-pulse — no
+  // behavior: never checks the ledger, never taps the pen cup, never steps
+  // back to look at his own chart. Holds feel supervised by a machine."
+  // THE BEHAVIOR CLOCK: every 4.2s of scene time (from sceneT 2.4s — after
+  // the entrance walk settles) the host performs ONE behavior in a 1.7s
+  // window, cycling three states keyed to the desk props the stage now
+  // carries (the ledger book + pen cup at the exhibit's foot):
+  //   0 THE LEDGER CHECK — head and eyes drop to the desk ledger, brows
+  //     ease down (he reads his own numbers), torso tips a beat forward.
+  //   1 THE PEN-CUP TAP — the far arm drops to the desk and taps the cup
+  //     twice (a 2-strike rhythm on the forearm), the head holds the room.
+  //   2 THE STEP-BACK LOOK — weight rocks back onto the heels (lean + a
+  //     2px rise), the head turns UP into his own headline/exhibit band.
+  // All pose-level terms with a sine ramp in/out (zero at both window
+  // edges — pose continuity exact), skipped while ANY walk window owns the
+  // figure. Deterministic f(sceneT); scrub-safe.
+  const behaveSt = g.sceneT - 2400;
+  const behave = behaveSt >= 0 && walkPhase === undefined
+    ? (() => {
+        const wt = behaveSt % 4200;
+        if (wt >= 1700) return null;
+        return { idx: Math.floor(behaveSt / 4200) % 3, wt, ramp: Math.sin((wt / 1700) * Math.PI) };
+      })()
+    : null;
+  let behaveLook = 0.8;
+  if (behave) {
+    const { idx, wt, ramp } = behave;
+    if (idx === 0) {
+      // THE LEDGER CHECK — eyes/head down-right toward the desk props
+      pose = {
+        ...pose,
+        headTilt: (pose.headTilt ?? 0) + 7 * ramp,
+        browRaise: Math.max(0, (pose.browRaise ?? 0) - 0.12 * ramp),
+        lean: (pose.lean ?? 0) + 2.5 * ramp,
+        rootY: (pose.rootY ?? 0) + 1.5 * ramp,
+      };
+      behaveLook = 0.8 - 0.55 * ramp;
+    } else if (idx === 1) {
+      // THE PEN-CUP TAP — the far arm drops to the desk, two strikes
+      const tap = wt < 900 ? Math.abs(Math.sin((wt / 180) * Math.PI)) : 0;
+      pose = {
+        ...pose,
+        lAU: lerp(pose.lAU ?? 0, -34, 0.5 * ramp),
+        lAL: lerp(pose.lAL ?? 0, -58, 0.5 * ramp) + 6 * tap * ramp,
+        browRaise: Math.max(0, (pose.browRaise ?? 0) - 0.06 * ramp),
+      };
+    } else {
+      // THE STEP-BACK LOOK — weight back, head up into his own content
+      pose = {
+        ...pose,
+        lean: (pose.lean ?? 0) - 5 * ramp,
+        rootY: (pose.rootY ?? 0) - 2 * ramp,
+        headTilt: (pose.headTilt ?? 0) - 5 * ramp,
+        browRaise: (pose.browRaise ?? 0) + 0.12 * ramp,
+      };
+      behaveLook = 0.8 + 0.25 * ramp;
+    }
+  }
+  // ── 100-JUDGE VISUAL AUDIT (defect D-25 — THE EDITORIAL HOST WALKS OUT) ──
+  // the character-exit progress only ever reached the side-host drawHost;
+  // the film's MAIN editorial host stood planted through every exit (the
+  // report: "the host almost never walks a scene out"). The editorial host
+  // now consumes the same camState.exitCharP: he turns back toward his
+  // entry edge (flip), the keyed walk cycle plays, and he walks the scene
+  // out — the type column keeps its clearance because he walks AWAY from
+  // it. THE EXIT STACK YIELDS WHEN IT WOULD CROP (the file's own D3 law):
+  // the travel bounds the guard's hip envelope (±88 rig units) inside the
+  // frame — the walk reads as a committed stride toward the exit and the
+  // cut lands as he reaches it, never a half-body crop. Skipped while a
+  // walk window owns the figure.
+  const exitCharP2 = camState.exitCharP || 0;
+  let exitWalkX2 = 0;
+  let exitFlip = false;
+  if (exitCharP2 > 0 && walkPhase === undefined) {
+    // bound by the guard's hip envelope (±88 rig units): the hip band's
+    // left edge never crosses x=40 — the walk commits, the cut lands first.
+    exitWalkX2 = -Math.min(420, Math.max(0, hx - (40 + 88 * HOST_SCALE))) * exitCharP2;
+    walkPhase = exitCharP2 * 2.6;
+    exitFlip = true;
+  }
   // U-04 — ONE COSTUME LAW: the editorial host renders through the
   // stickman-v2 drawHost wrapper (imported as drawHostFig — this file's
   // own drawHost is the staging helper) — the same wrapper door the
@@ -1024,8 +1114,11 @@ export function hostSceneV2(g: SceneCtx): void {
     // PANEL ACCEPTANCE (audit FIX 1): ground H*0.585 → HOST_GROUND (0.62) —
     // at the 0.585 ground the 2.4× host's head topped out at 56px headroom
     // (5%); the shared 0.62 ground restores the ~9% the probe gate wants.
-    ctx, hx, HOST_GROUND(H), HOST_SCALE, t,
-    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: 0.8, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.45, // VAULT NOIR: 0.55 → 0.45 — the crown band needs the drift headroom (sweep @1156-1163s)
+    ctx, hx + exitWalkX2, HOST_GROUND(H), HOST_SCALE, t,
+    { pose, alpha: 0.85 + 0.15 * clamp01(g.sceneT / 180), look: exitFlip ? 0 : behaveLook, scarf: true, nod: nodP, talk, smear: smr, walkPhase, squash: walkPhase !== undefined ? walkStrike(walkPhase) : 0, parallax: true, parallaxAmt: 0.45, // VAULT NOIR: 0.55 → 0.45 — the crown band needs the drift headroom (sweep @1156-1163s)
+      // D-25: the walk-out flips the figure toward his entry edge (he
+      // turns and walks AWAY from the type column).
+      flip: exitFlip,
       // PANEL ACCEPTANCE (audit FIX 2): full-body envelope — see drawHost.
       hostBody: true,
       stretch: Math.min(1,
@@ -1083,7 +1176,18 @@ export function hostSceneV2(g: SceneCtx): void {
   // ── editorial type block, right two-thirds (DRAWING) ──
 
   // kicker chip
-  const kick = (g.s.kicker as string) ?? 'THE DATA DESK · THE EVERGREEN FUND';
+  // ── 100-JUDGE VISUAL AUDIT (defect D-28 — KICKER REPETITION) ──────────────
+  // the shared fallback ('THE DATA DESK · THE EVERGREEN FUND') printed
+  // IDENTICAL text on consecutive beats (b022, b023) — "repetition of
+  // labels reads as automation". The fallback now derives from the BEAT'S
+  // OWN words: the serif headline's first line, uppercased (the kick
+  // identifies the beat, not the wallpaper). Every beat's chip is unique
+  // by construction; a beat that ships no headline keeps the brand line.
+  const headSrc = ((g.s.headline as string) ?? pull.head).split('\n')[0] ?? '';
+  const kick = (g.s.kicker as string)
+    ?? (headSrc.trim()
+      ? headSrc.trim().toUpperCase().slice(0, 46)
+      : 'THE DATA DESK · THE EVERGREEN FUND');
   setFont(ctx, 34, 600); // v9 (D-07): floor
   const kw = ctx.measureText(kick).width;
   registerRect('hostV2:kicker', hx2, 168, kw + 48, 52);
@@ -1351,6 +1455,52 @@ export function hostSceneV2(g: SceneCtx): void {
     ctx.lineTo(fx0 + fw * 0.28, fy0 + fh + 26);
     ctx.moveTo(fx0 + fw * 0.68, fy0 + fh);
     ctx.lineTo(fx0 + fw * 0.72, fy0 + fh + 26);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // ── 100-JUDGE VISUAL AUDIT (defect D-24 — THE DESK PROPS) ────────────────
+  // the audit's behavior list names the ledger and the pen cup — objects
+  // the stage never carried, so the behaviors had nothing to act on. The
+  // exhibit's foot gains its desk set: the LEDGER BOOK (the closed navy
+  // ledger with the brass page edge) + the PEN CUP (three pens). Quiet
+  // furniture at the exhibit's base — present on every host stage, the
+  // anchor for the D-24 behavior clock (ledger check / pen tap).
+  if (fp > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.72 * fp;
+    const pdx = ex0 + 8;
+    const pdy = ey0 + eh + 2;
+    // the ledger book — a closed navy ledger, brass page edge
+    ctx.fillStyle = 'rgba(10, 23, 48, 0.9)';
+    roundRect(ctx, pdx, pdy + 6, 46, 24, 5);
+    ctx.fill();
+    ctx.strokeStyle = rgba(PALETTE.gold, 0.7);
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(pdx + 8, pdy + 6);
+    ctx.lineTo(pdx + 8, pdy + 30);
+    ctx.stroke();
+    ctx.strokeStyle = rgba(PALETTE.grid, 0.8);
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(pdx, pdy + 6, 46, 24);
+    // the pen cup — the cup + three pens at different heights
+    const cxp = pdx + 62;
+    ctx.fillStyle = 'rgba(10, 23, 48, 0.92)';
+    roundRect(ctx, cxp, pdy + 8, 22, 24, 4);
+    ctx.fill();
+    ctx.strokeStyle = rgba(PALETTE.grid, 0.8);
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(cxp, pdy + 8, 22, 24);
+    ctx.strokeStyle = rgba(PALETTE.gold, 0.85);
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cxp + 5, pdy + 8);
+    ctx.lineTo(cxp + 7, pdy - 6);
+    ctx.moveTo(cxp + 11, pdy + 8);
+    ctx.lineTo(cxp + 11, pdy - 10);
+    ctx.moveTo(cxp + 17, pdy + 8);
+    ctx.lineTo(cxp + 16, pdy - 4);
     ctx.stroke();
     ctx.restore();
   }

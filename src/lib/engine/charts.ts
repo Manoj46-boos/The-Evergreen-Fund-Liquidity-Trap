@@ -4,7 +4,7 @@
  * All light-theme, all deterministic functions of (t, p).
  */
 
-import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic, easeOutQuad, hashStr, lerp, springTo, landPulse } from './easing';
+import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic, easeOutQuad, hashStr, lerp, springTo, landPulse, impactSquash, windUp, landSettle } from './easing';
 import { PALETTE, TONE, card, chip, rgba, roundRect, setFont, fitText, TYPE_FLOOR, LABEL_FLOOR, toneRoom, deskRule, ValuePlane, mixHex } from './theme';
 import { registerRect, registerFixed, registerText } from './collision';
 // P4 (100-judge audit §13 — CHART IMPACT GRAMMAR): bars and lines land as
@@ -1011,13 +1011,44 @@ export function barRow(
   g.addColorStop(0, rgba(cFill, 0.92));
   g.addColorStop(1, cFill);
   ctx.fillStyle = g;
-  roundRect(ctx, x, by, Math.max(30, bw), 30, 15);
-  ctx.fill();
-  if (muted) {
-    ctx.strokeStyle = rgba(PALETTE.ink, 0.5);
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, x, by, Math.max(30, bw), 30, 15);
-    ctx.stroke();
+  // ── 100-JUDGE VISUAL AUDIT (defects D-21 + D-22 — THE BAR IS A MASS) ────
+  // two volume terms, both pure f(p/t) and zero outside their windows:
+  //   D-22 THE WIND-UP — during the first 22% of the entrance progress the
+  //   fill COILS: 14px back along its own track and 6px shorter (the
+  //   pull-back every launched object needs — "stat numerals, bars and
+  //   chips enter with no wind-up anywhere else"), releasing into the
+  //   grow ease with exact continuity (the envelope hits zero at 0.22).
+  //   D-21 THE IMPACT — at the certified landing instant (landAge
+  //   0..360ms) the fill squashes about the TRACK line (the bar's
+  //   ground): wide + short at the squash, the stretch counter-bounce in
+  //   the recovery — the volume pair the walk already carries, on the
+  //   bar's own mass.
+  const wu = windUp(p);
+  const barSq = impactSquash(landAge);
+  const squashK = 0.09 * barSq;
+  {
+    const fillW = Math.max(30, bw);
+    const coilX = wu > 0 ? -14 * wu : 0;
+    const coilH = wu > 0 ? 30 - 6 * wu : 30;
+    const fillY = by + (30 - coilH);
+    if (squashK !== 0) {
+      ctx.save();
+      ctx.translate(x + fillW / 2, by + 15);
+      ctx.scale(1 + squashK, 1 - 1.3 * squashK);
+      ctx.translate(-(x + fillW / 2), -(by + 15));
+      roundRect(ctx, x + coilX, fillY, fillW, coilH, 15);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      roundRect(ctx, x + coilX, fillY, fillW, coilH, 15);
+      ctx.fill();
+    }
+    if (muted && wu === 0 && squashK === 0) {
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.5);
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, x, by, fillW, 30, 15);
+      ctx.stroke();
+    }
   }
   // P4 — the ring fires from the bar CAP the instant the growth completes:
   // the record bar arriving is an EVENT the camera acknowledges (furniture
@@ -1513,38 +1544,79 @@ export function sourceTag(
   // camera, so it can never be pushed off-frame, and it registers as fixed
   // furniture with the guard.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = alpha;
-  // the citation row — U-08's fixed y (the design grid's 1005), so every
-  // scene's footnote sits on the same designed baseline
+  // ── 100-JUDGE VISUAL AUDIT (defect D-29 — SOURCE TAGS SUB-LEGIBLE) ───────
+  // "citations render as small grey lines at the frame foot … noise that
+  // costs contrast without earning trust — pure cost, no benefit, in the
+  // most valuable bottom strip of the frame." The citation becomes a
+  // DESIGNED element that earns the strip: a brass source glyph + the
+  // prefix in gold 700 (the trust signal) + the citation text at the 40px
+  // readable band in full ink (0.9) on a whisper glass plate. Measured
+  // shrink only to 38px (was 26); the plate is registered fixed furniture.
+  ctx.globalAlpha = Math.max(alpha, 0.9);
   const citeY = y;
   const bare = /^[Ss]ources?\b/.test(source.trim()) ? source.trim() : `Source: ${source}`;
   let txt = bare;
-  // U-08: the plate is 60% of the frame width, left-aligned at x 110
   const plateX = 110;
-  const maxW = W * 0.6;
-  let size = 34; // U-08: the 34px floor type
+  const maxW = W * 0.72;
+  // the prefix / body split — the prefix is the trust element
+  const mPre = bare.match(/^(Source:|Sources:)\s*(.*)$/);
+  const prefix = mPre ? mPre[1] : '';
+  const body = mPre ? mPre[2] : bare;
+  let size = 40; // D-29: the readable band (was 34 with shrink to 26)
   setFont(ctx, size, 400);
-  let tw = ctx.measureText(txt).width;
-  while (tw > maxW && size > 26) {
+  let tw = ctx.measureText((prefix ? prefix + '  ' : '') + body).width;
+  while (tw > maxW && size > 38) {
     size -= 2;
     setFont(ctx, size, 400);
-    tw = ctx.measureText(txt).width;
+    tw = ctx.measureText((prefix ? prefix + '  ' : '') + body).width;
   }
   if (tw > maxW) {
-    while (tw > maxW && txt.length > 16) {
-      txt = txt.slice(0, -2).replace(/[\s\u00b7\u2022,;:\u2014\u2013-]+$/, '') + '\u2026';
-      tw = ctx.measureText(txt).width;
+    let t2 = (prefix ? prefix + '  ' : '') + body;
+    while (ctx.measureText(t2).width > maxW && t2.length > 16) {
+      t2 = t2.slice(0, -2).replace(/[\s\u00b7\u2022,;:\u2014\u2013-]+$/, '') + '\u2026';
     }
+    txt = t2;
+    tw = ctx.measureText(t2).width;
+  } else {
+    txt = (prefix ? prefix + '  ' : '') + body;
   }
-  ctx.fillStyle = PALETTE.inkFaint;
+  // the whisper glass plate — the citation sits ON a designed surface, not
+  // naked on the room (the same navy glass the chips use, quieter)
+  ctx.fillStyle = 'rgba(7, 14, 30, 0.5)';
+  roundRect(ctx, plateX - 18, citeY - 34, tw + 96, 46, 23);
+  ctx.fill();
+  // the brass source glyph — a 10px gold dot + hairline rule, the citation's
+  // own brand mark (the trust signal the grey whisper never carried)
+  ctx.fillStyle = PALETTE.gold;
+  ctx.beginPath();
+  ctx.arc(plateX + 2, citeY - 12, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = rgba(PALETTE.gold, 0.55);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(plateX + 14, citeY - 12);
+  ctx.lineTo(plateX + 58, citeY - 12);
+  ctx.stroke();
   ctx.textAlign = 'left';
-  ctx.fillText(txt, plateX, citeY);
-  registerFixed(`sourceTag:${source.slice(0, 14)}`, plateX - 10, citeY - 26, tw + 40, 38);
+  if (prefix) {
+    setFont(ctx, size, 700);
+    ctx.fillStyle = PALETTE.goldInk;
+    ctx.fillText(prefix, plateX + 70, citeY);
+    const pw = ctx.measureText(prefix).width;
+    setFont(ctx, size, 400);
+    ctx.fillStyle = PALETTE.ink;
+    ctx.fillText(body, plateX + 70 + pw + 14, citeY);
+  } else {
+    setFont(ctx, size, 400);
+    ctx.fillStyle = PALETTE.ink;
+    ctx.fillText(txt, plateX + 70, citeY);
+  }
+  registerFixed(`sourceTag:${source.slice(0, 14)}`, plateX - 18, citeY - 34, tw + 96, 46);
   // v10 (PANEL-11): the tag is READING TEXT — a scene caption landing on it
   // (gasPump, verified defect) is a text-text collision the fixed-furniture
   // check cannot see unless the caption is also registered. Register it in
   // the text set too, so any registerText'd caption is checked against it.
-  registerText(`sourceTag:${source.slice(0, 14)}`, plateX - 10, citeY - 26, tw + 40, 38, true);
+  registerText(`sourceTag:${source.slice(0, 14)}`, plateX - 18, citeY - 34, tw + 96, 46, true);
   ctx.restore();
 }
 

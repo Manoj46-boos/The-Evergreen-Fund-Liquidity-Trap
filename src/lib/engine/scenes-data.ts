@@ -6,7 +6,7 @@
  */
 
 import { clamp, clamp01, easeInOutCubic, easeOutBack, easeOutCubic, hash01, hashStr, lerp, seamArrival, springTo } from './easing';
-import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill, STROKE, kickerChip } from './theme';
+import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill, STROKE, kickerChip, NUM } from './theme';
 import { bokehField, kMotifs, lightRays, drawK, drawK3D, sparkles, hazeBands, impactRing, microShake, depthShift } from './effects';
 import { SceneCtx } from './scene-context';
 import { REACTIONS, reactionAt, reactionStart } from './scene-context';
@@ -1295,7 +1295,9 @@ export function barsCompareScene(g: SceneCtx): void {
       // above CAPTION_ZONE_TOP, 9px under the last bar row.
       const fy = H * 0.6;
       card(ctx, fx, fy, 640, 130, { r: 26 });
-      setFont(ctx, 62, 700);
+      // D-27: the flip counter draws at the sub register of the number
+      // scale law (was an ad-hoc 62 literal).
+      setFont(ctx, NUM.sub, 700);
       ctx.fillStyle = PALETTE.down;
       ctx.textAlign = 'left';
       const from = fc.from as number;
