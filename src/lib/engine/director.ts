@@ -10,7 +10,7 @@ import { PALETTE, paintBg, rgba, hexLerp as mixHex2, FONT_DISPLAY, FONT_UI, draw
 import { drawGrain, lightVignette, bokehField, scalePunch, camState, guardCamState, irisWipe, fgBokeh, dofPass, chapterAccent, drawPct3D } from './effects';
 import { drawParticles, emitterKindFor } from './particles';
 import { drawCaptions, drawChapterCard, drawChapterLabel, drawProgressBar, drawWatermark } from './textfx';
-import { Timeline, beatAt } from './timeline';
+import { Timeline, TimelineBeat, beatAt } from './timeline';
 import { SceneCtx, SceneDrawer, REACTIONS, reactionAt, resetHeadlineDedup } from './scene-context';
 import { collisionGuard, collisionGuard as guardRef, resetGuard, setGuardOverlay, setGuardCamera, collectViolations } from './collision';
 import { AMP, HERO } from './perception';
@@ -905,6 +905,11 @@ export function drawFrame(
     // 100-JUDGE PANEL / Phase 4 item 4.3: the beat's chapter index — the
     // value-plane rotation's key (theme.valuePlaneFor(g.chapterIdx)).
     chapterIdx: beat.chapter,
+    // 100-JUDGE VISUAL AUDIT (D-07 — THE FRAMING ROTATION CLOCK): this
+    // beat's index within its sceneKey run. The long-run scenes re-block
+    // their framing from it (caseFiles %3, auditChecklist %3,
+    // wrapperMatrix %2) — no scene holds one layout for 9-15 beats again.
+    runIdx: runIndexOf(tl, beat),
   };
 
   // scale context for non-1080p targets (design grid is 1920×1080)
@@ -1291,20 +1296,46 @@ export function drawFrame(
   // keep the full cinematic focus.
   lightVignette(ctx, W, H, [0, 1, 4, 5, 6, 7].includes(beat.chapter) ? 0.5 : 0.62);
 
-  // global fades: from white at start, to white at end
-  // P1-8 (report §12.8): the cold-open white fade 600ms → 180ms. The 600ms
-  // fade held the frame at half-white while the K was already trying to
-  // grow — a 0.4s of dead air before the film says anything. 180ms is still
-  // a cut-softening breath, but the first stroke is now fighting a veil,
-  // not a wall.
-  const fadeIn = 1 - clamp01(t / 180);
+  // global fades: to white at end — and THE FIRST-FRAME CONTRACT at the open.
+  // 100-JUDGE VISUAL AUDIT (defect D-04 — BLANK AND NEAR-BLANK FRAMES AT
+  // BOUNDARIES): the open ran a white fade-in (600ms → 180ms over the
+  // project's life), which rendered FRAME ZERO as a 100%-white card — the
+  // measured ink fraction of the film's first frame was 0.0%. A YouTube
+  // upload's first frame is its business card (hover previews, suggested-
+  // feed stills, the scrub thumbnail): it must carry the film's content
+  // from pixel one. The open is now a HARD OPEN on the cold open's landing
+  // (the brass glyph + the pulled slice + the $1,000,000 slot are all
+  // present at frame 0 by the U-23/U-15 contract; the landing squash, the
+  // impact ring and the cut punch carry the arrival energy the veil used
+  // to fake). The end fade keeps its 1100ms breath.
   const fadeOut = clamp01((t - (tl.durationMs - 1100)) / 1100);
-  const white = Math.max(fadeIn, fadeOut);
+  const white = fadeOut;
   if (white > 0.001) {
     ctx.fillStyle = rgba('#FFFFFF', white);
     ctx.fillRect(0, 0, W, H);
   }
   ctx.restore();
+}
+
+/**
+ * 100-JUDGE VISUAL AUDIT (D-07): the beat's index within its sceneKey
+ * sequence — the deterministic framing-rotation key. The count walks back
+ * over ALL prior beats carrying the same sceneKey (not merely adjacent
+ * ones — a film's scene sequence is often interrupted by reaction beats,
+ * and the framing must keep rotating across the interruption). NOTE:
+ * TimelineBeat.beatIndex is the beat's index WITHIN its chapter — the walk
+ * needs the beat's GLOBAL position in tl.beats, so the identity search
+ * (the beats array holds this exact object) anchors it.
+ */
+function runIndexOf(tl: Timeline, beat: TimelineBeat): number {
+  const key = (beat.beat.scene as { sceneKey?: string }).sceneKey;
+  const gi = tl.beats.indexOf(beat);
+  let idx = 0;
+  for (let i = gi - 1; i >= 0; i--) {
+    if ((tl.beats[i].beat.scene as { sceneKey?: string }).sceneKey !== key) continue;
+    idx++;
+  }
+  return idx;
 }
 
 /** Draws a nice idle frame for the UI preview before timeline exists. */

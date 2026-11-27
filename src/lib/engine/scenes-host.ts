@@ -685,8 +685,16 @@ export function hostSceneV2(g: SceneCtx): void {
   // must clear the headline column (W*0.47 = 902) at 0.325·W + 37 + 233
   // = 894 ✓. The old 0.34 block (653px) plated the headline by 13-20px
   // whenever the drift ran right — caught by the full-film guard sweep.
-  // Set: 461 / 547 / 624 — genuine 86-163px crossings, all walkable.
-  const BLOCKS = [W * 0.24, W * 0.285, W * 0.325];
+  // Set: 451 / 547 / 624 — genuine 96-173px crossings, all walkable.
+  // 100-JUDGE VISUAL AUDIT (defect D-01 — THE PRESENTER PARKED OUTSIDE THE
+  // DATA): the far block is pinned at its certification ceiling — the fix
+  // is NOT a longer walk, it is the DATA WALKING TO HIM: the exhibit slot
+  // (the K panel / easel / desk) moves LEFT out of the type column and
+  // into the stage itself (ex0 = W*0.352), so the far block parks the host
+  // DIRECTLY ADJACENT to his exhibit — his palm rests ON its edge and his
+  // presenting hand points INTO the exhibit band. "Text card + mascot"
+  // becomes "presenter + his own exhibit".
+  const BLOCKS = [W * 0.235, W * 0.285, W * 0.325];
   const blockX = (idx: number): number => BLOCKS[Math.max(0, Math.min(BLOCKS.length - 1, idx))];
   const blockFor = (id?: string): number => {
     if (!id) return W * 0.34; // not speaking → the house block (centre of the set)
@@ -960,6 +968,26 @@ export function hostSceneV2(g: SceneCtx): void {
   // element, never the letters). (walkAcross/walkDurMs hoisted above the
   // entrance branch.)
   const entranceWalking = entrance === 'walk' && t < walkDurMs;
+  // ── D-01 + D-02: THE EXHIBIT SLOT (hoisted above the host draw so the
+  // contact verbs can target it) ── the exhibit card joins the host's
+  // stage (ex0 = W*0.352) and rotates through the film's four established
+  // props per sceneKey (full rationale + slot list at the drawing block
+  // below). The far-block host parks ADJACENT to this slot; his palm
+  // presses its left edge and his presenting hand solves INTO the band —
+  // the "figure floats beside the data" read is retired at the layout law.
+  const fp = clamp01((t - 1100) / 500);
+  const ex0 = W * 0.352;
+  const ey0 = 604;
+  // Panel fix (guard sweep, 692s): the right margin widens 180 → 240 so
+  // the card survives the worst exit camera (truck + 1.06 push) without
+  // crossing the frame edge — the wider column shift demanded it.
+  const ew = W - ex0 - 240;
+  const eh = 152;
+  const exKey = String(g.s.sceneKey ?? g.beat.scene.sceneKey ?? 'host');
+  const exVariant = stage === 'chartstand' ? 1
+    : stage === 'spot'
+      ? Math.floor(hash01(hashStr(exKey + '#exhibit')) * 4) % 4
+      : 0; // kflip / kclimb / kdescend keep the K panel — their subject
   // U4: the editorial host inherits the beat's face from its voStyle —
   // blended AFTER the take blocks so the take's own brow terms ride on
   // top during reaction windows, and the voStyle face owns the rest.
@@ -996,9 +1024,17 @@ export function hostSceneV2(g: SceneCtx): void {
       // U13: walkAcross beats swap the protective gate for the CONTACT —
       // after the crossing lands, the palm presses the hairline rule's
       // cap (a graphic element, never the letters).
+      // 100-JUDGE VISUAL AUDIT (D-01 — THE CONTACT VERBS): once the
+      // exhibit is up, the presenting hand's target IS the exhibit —
+      // the palm presses the card's left edge (a solved contact on a
+      // registered, declared object) and the gesture never again points
+      // into open space short of the data. Before the exhibit arrives
+      // (fp < 0.5) the certified headline-band gate still owns the arm.
       pointAt: walkAcross && !entranceWalking
         ? { x: hx2, y: hairYPre - 8, w: 130, h: 30, hand: 'palm' as const, strength: 1 }
-        : { x: hx2, y: 240, w: W - hx2 - 180, h: 320, enforce: true },
+        : fp > 0.5
+          ? { x: ex0 + 4, y: ey0 + 26, w: 150, h: 72, hand: 'palm' as const, strength: 1 }
+          : { x: hx2, y: 240, w: W - hx2 - 180, h: 320, enforce: true },
     },
     11
   );
@@ -1008,6 +1044,17 @@ export function hostSceneV2(g: SceneCtx): void {
     // (the guard's hand-vs-text pass honors designed hand-on-text).
     declareHostContact('hostV2:headline');
     declareHostContact('hostV2:headlineTxt');
+  }
+  if (fp > 0.5) {
+    // D-01: the host's stage now SHARES its band with the exhibit card —
+    // the overlap of his hip band with the card's left edge is the DESIGNED
+    // staging (he stands at his exhibit's edge, palm planted). Both the
+    // explicit register AND card()'s own auto-registered rect join the
+    // declared-contact set — on walkAcross beats too (the exhibit exists
+    // and the body band overlaps it regardless of the arm grammar).
+    declareHostContact('hostV2:exhibit');
+    declareHostContact(`card@${Math.round(ex0)},${ey0}`);
+    if (exVariant === 1) declareHostContact('hostV2:easel');
   }
 
   // ── editorial type block, right two-thirds (DRAWING) ──
@@ -1086,35 +1133,49 @@ export function hostSceneV2(g: SceneCtx): void {
     // yield-to-K-fig-panel budget applies to the wrapped lines.
     const colW = W - 96 - hx2;
     const subLines = sub.split('\n').flatMap((ln) => wrapText(ctx, ln, colW, 34, 400));
-    const maxSub = Math.max(1, Math.floor((596 - (hairY + 72)) / 44));
-    subLines.slice(0, Math.max(1, maxSub)).forEach((ln, i) => ctx.fillText(ln, hx2, hairY + 72 + i * 44));
+    // FIX D-01 (companion — THE SUB-COPY CLIP): the sub must END above the
+    // exhibit card (ey0 - 18). The old 596 budget let 3-line headlines
+    // start the sub at ~637 — the exhibit's top edge plated the line (the
+    // audit frame shipped "e yield." clipped under the card). Lines that
+    // do not fit are cut by the LAYOUT, never by another object's ink.
+    const maxSub = Math.max(0, Math.floor(((ey0 - 18) - (hairY + 72)) / 44));
+    subLines.slice(0, maxSub).forEach((ln, i) => ctx.fillText(ln, hx2, hairY + 72 + i * 44));
     ctx.restore();
   }
 
   // ── P0-5 (100-judge audit, Table 2 — the phone-gate re-block): THE
-  // K-FIGURE PANEL. The audit frame read "80 percent negative space and a
+  // EXHIBIT SLOT. The audit frame read "80 percent negative space and a
   // stick figure - a loading screen" (1/10 at the 320px gate): the type
-  // stack ended at y≈584 and the frame's entire lower band — the right
-  // column below the sub copy, the strip under the host's feet — was
-  // void. The film's title object now occupies the abandoned lower-right
-  // column: one junction, the market line rising, the main-street line
-  // falling — the K itself, in the formation's own arm colors, as the
-  // editorial figure the host presents. The lower band carries
-  // information; the phone gate reads a composed frame.
-  const fp = clamp01((t - 1100) / 500);
-  if (fp > 0 && stage !== 'chartstand') {
+  // stack ended at y≈584 and the frame's entire lower band was void. The
+  // exhibit card fills the band — and since the D-01 fix it sits in the
+  // HOST'S STAGE (ex0 = W*0.352), not beside the type column: the host's
+  // far block parks him with his palm ON the card's left edge.
+  //
+  // 100-JUDGE VISUAL AUDIT (defect D-02 — THE SAME DECOR REPEATS ACROSS
+  // THE FILM): the exhibit is no longer ONE object stamped on every host
+  // beat. It is a FOUR-SLOT ROTATION of the film's own established props,
+  // keyed deterministically by the sceneKey hash (scrub-safe, stable per
+  // scene, no teleports):
+  //   0 — THE K-PANEL   (markets / main street — the brand formation;
+  //                     ALWAYS the exhibit on the k* stages, where the
+  //                     formation is the literal subject)
+  //   1 — THE EASEL     (the rising chart exhibit — was chartstand-only)
+  //   2 — THE REDEMPTION DESK (the film's established $100,000 / $50,000
+  //                     requested-vs-received bars, compact)
+  //   3 — THE HOUSEHOLD FIELD (the film's 500-household motif, compact:
+  //                     the market half vs the mood half)
+  // Novelty stops spending the same coin dozens of times.
+  if (fp > 0 && exVariant !== 1) {
     ctx.save();
     ctx.globalAlpha = fp;
     ctx.translate(0, (1 - easeOutCubic(fp)) * 24);
-    const fx0 = hx2 + 12; // P0-5 panel note: +12 — optical alignment, the rounded card's edge against the flush text column
-    const fy0 = 604;
-    // Panel fix (guard sweep, 692s): the right margin widens 180 → 240 so
-    // the card survives the worst exit camera (truck + 1.06 push) without
-    // crossing the frame edge — the wider column shift demanded it.
-    const fw = W - hx2 - 240;
-    const fh = 152;
-    registerRect('hostV2:kfig', fx0, fy0, fw, fh);
-    card(ctx, fx0, fy0, fw, fh, { r: 24 });
+    registerRect('hostV2:exhibit', ex0, ey0, ew, eh);
+    card(ctx, ex0, ey0, ew, eh, { r: 24 });
+    if (exVariant === 0) {
+    const fx0 = ex0;
+    const fy0 = ey0;
+    const fw = ew;
+    const fh = eh;
     const jx = fx0 + 120;
     const jy = fy0 + fh / 2;
     // Panel round 2: the arrows scale with the card (they were fixed at
@@ -1162,22 +1223,87 @@ export function hostSceneV2(g: SceneCtx): void {
     ctx.fillText('MARKETS', fx0 + fw - 24, fy0 + 38);
     ctx.fillStyle = PALETTE.downVivid;
     ctx.fillText('MAIN STREET', fx0 + fw - 24, fy0 + fh - 24);
+    } else if (exVariant === 2) {
+    // variant 2 — THE REDEMPTION DESK: the film's own established
+    // proration pair ($100,000 requested / $50,000 received), compact.
+    // The two bars + labels are drawn from the same data prorationDemo
+    // teaches with — no new facts, a re-staged film prop.
+    const fx0 = ex0;
+    const fy0 = ey0;
+    const fw = ew;
+    const fh = eh;
+    const barX = fx0 + 36;
+    const barW = fw * 0.42;
+    const rowsD: Array<{ k: string; v: string; frac: number; tone: string }> = [
+      { k: 'YOU REQUESTED', v: '$100,000', frac: 1, tone: 'gold' },
+      { k: 'YOU RECEIVED', v: '$50,000', frac: 0.5, tone: 'down' },
+    ];
+    rowsD.forEach((r, i) => {
+      // rows ride LOW (56/112) — the desk's name keeps the top band to
+      // itself (the guard's text-vs-text pass never sees a value cap
+      // under the label's baseline)
+      const by = fy0 + 56 + i * 56;
+      setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
+      ctx.fillStyle = PALETTE.inkSoft;
+      ctx.textAlign = 'left';
+      ctx.fillText(r.k, barX, by - 8);
+      ctx.fillStyle = PALETTE.track;
+      roundRect(ctx, barX, by, barW, 22, 8);
+      ctx.fill();
+      ctx.fillStyle = TONE(r.tone).main;
+      roundRect(ctx, barX, by, Math.max(18, barW * r.frac), 22, 8);
+      ctx.fill();
+      setFont(ctx, 44, 700, FONT_DISPLAY);
+      ctx.fillStyle = TONE(r.tone).main;
+      ctx.fillText(r.v, barX + barW + 36, by + 20);
+    });
+    setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = PALETTE.goldInk;
+    ctx.fillText('REDEMPTION DESK', fx0 + fw - 24, fy0 + 30);
+    } else {
+    // variant 3 — THE HOUSEHOLD FIELD: the film's 500-household motif,
+    // compact — the market half vs the mood half (the splitNumbers
+    // labels, the film's own recurring population read).
+    const fx0 = ex0;
+    const fy0 = ey0;
+    const fw = ew;
+    const fh = eh;
+    const halfW = (fw - 96) / 2;
+    const colsD = 14;
+    const rowsD = 4;
+    const pit = Math.min(halfW / colsD, (fh - 56) / rowsD);
+    [['the market half', PALETTE.up, 0], ['the mood half', PALETTE.down, 1]].forEach(([lab, col, half]) => {
+      const hx0 = fx0 + 36 + (half as number) * (halfW + 24);
+      for (let i = 0; i < colsD * rowsD; i++) {
+        const cx2 = hx0 + (i % colsD) * pit;
+        const cy2 = fy0 + 52 + Math.floor(i / colsD) * pit;
+        ctx.fillStyle = rgba(col as string, 0.62);
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
+      ctx.fillStyle = col as string;
+      ctx.textAlign = 'left';
+      ctx.fillText(lab as string, hx0, fy0 + 34);
+    });
+    // (no corner label — the two labeled halves ARE the read; a third
+    // string fought the half labels at the feed scale)
+    }
     ctx.restore();
   }
-  // D9: on chartstand beats the presented exhibit lives in the SAME
-  // certified slot the K-fig panel uses (fy0 604, fh 152 — bottom 756,
-  // clear of the caption pill) so the guard's envelope holds: a landscape
-  // chart card with the rising doodle and SHORT easel legs (to y 782 —
-  // 14px above the pill top). The C3 re-sweep caught the earlier taller
-  // easel plating the pill band by ~92px — the slot swap is structural.
-  if (fp > 0 && stage === 'chartstand') {
+  // D9 + D-02: the easel is BOTH the chartstand exhibit AND rotation
+  // member 1 — same certified slot (bottom 756, clear of the caption
+  // pill), so the guard's envelope holds for every variant.
+  if (fp > 0 && exVariant === 1) {
     ctx.save();
     ctx.globalAlpha = fp;
     ctx.translate(0, (1 - easeOutCubic(fp)) * 24);
-    const fx0 = hx2 + 12;
-    const fy0 = 604;
-    const fw = W - hx2 - 240;
-    const fh = 152;
+    const fx0 = ex0;
+    const fy0 = ey0;
+    const fw = ew;
+    const fh = eh;
     registerRect('hostV2:easel', fx0, fy0, fw, fh);
     card(ctx, fx0, fy0, fw, fh, { r: 24 });
     // the rising chart doodle — the exhibit the host presents
@@ -1221,6 +1347,45 @@ export function splitNumbersScene(g: SceneCtx): void {
   scenePlate(ctx, W, H, g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
   bokehField(ctx, W, H, t, { intensity: 0.9, seed: 12 });
   const mode = (s.mode as string) || 'left';
+  const propStats = s.stats as StatItem[] | undefined;
+  const hasProps = Array.isArray(propStats) && propStats.length > 0;
+  // D-06: the stat resolution extracted so the declaration above can read
+  // the SAME lists the panels draw (one source of truth, no drift).
+  const splitStatsOf = (src: Record<string, any>, m: string, side: 'left' | 'mood'): StatItem[] =>
+    side === 'left'
+      ? (Array.isArray(src.leftStats) && src.leftStats.length
+        ? (src.leftStats as StatItem[])
+        : m === 'left' && hasProps
+          ? (propStats as StatItem[])
+          : [
+              { big: '+18%', label: 'S&P 500 · past year', tone: 'up' },
+              { big: '+20%', label: 'Nasdaq · past year', tone: 'up' },
+              { big: 'RECORD', label: 'corporate profit margins', tone: 'gold' },
+            ])
+      : (Array.isArray(src.rightStats) && src.rightStats.length
+        ? (src.rightStats as StatItem[])
+        : m !== 'left' && Array.isArray(propStats) && propStats.length
+          ? (propStats as StatItem[])
+          : [
+              { big: '16%', label: 'called the economy “good” or “excellent”', tone: 'down' },
+              { big: '1 in 4', label: 'average recession odds · 72 economists (WSJ)', tone: 'down' },
+            ]);
+  // VAULT NOIR v3: explicit two-panel props — leftStats/rightStats +
+  // leftKicker/rightKicker let a beat own BOTH panels (the old film's
+  // market/mood fallbacks remain for compatibility).
+  const leftStats: StatItem[] = splitStatsOf(s, mode, 'left');
+  // D-1: in vs modes the beat's own stats (the mood numbers) drive the
+  // mood panel, with the same empty-array guard the market panel got in D-03.
+  const moodStats: StatItem[] = splitStatsOf(s, mode, 'mood');
+
+
+  // 100-JUDGE VISUAL AUDIT (defect D-06): the panels declare their words
+  // (the audit's b003 frame: the pill repeated the slot's numbers while
+  // they were already on screen).
+  declareOnScreenHeadline(
+    'THE MARKET THE MOOD SAME COUNTRY. SAME YEAR. ' +
+    [...splitStatsOf(s, mode, 'left'), ...splitStatsOf(s, mode, 'mood')].map((st) => `${st.big} ${st.label}`).join(' ')
+  );
 
   const panelW = W * 0.38;
   // v2 (PATCH 4 follow-up): panels slightly shorter + higher, freeing a
@@ -1251,32 +1416,6 @@ export function splitNumbersScene(g: SceneCtx): void {
   // s.stats now routes by MODE: 'left' beats carry market numbers →
   // market panel; 'vs'/'vs-punch' beats carry mood numbers → mood panel;
   // the market panel owns its own list in every vs mode.
-  const propStats = s.stats as StatItem[] | undefined;
-  const hasProps = Array.isArray(propStats) && propStats.length > 0;
-  // VAULT NOIR v3: explicit two-panel props — leftStats/rightStats +
-  // leftKicker/rightKicker let a beat own BOTH panels (the old film's
-  // market/mood fallbacks remain for compatibility).
-  const leftStats: StatItem[] = Array.isArray(s.leftStats) && s.leftStats.length
-    ? (s.leftStats as StatItem[])
-    : mode === 'left' && hasProps
-      ? (propStats as StatItem[])
-      : [
-          { big: '+18%', label: 'S&P 500 · past year', tone: 'up' },
-          { big: '+20%', label: 'Nasdaq · past year', tone: 'up' },
-          { big: 'RECORD', label: 'corporate profit margins', tone: 'gold' },
-        ];
-  // D-1: in vs modes the beat's own stats (the mood numbers) drive the
-  // mood panel, with the same empty-array guard the market panel got in D-03.
-  const moodStats: StatItem[] =
-    (Array.isArray(s.rightStats) && s.rightStats.length
-      ? (s.rightStats as StatItem[])
-      : mode !== 'left' && Array.isArray(propStats) && propStats.length
-      ? propStats
-      : [
-          { big: '16%', label: 'called the economy “good” or “excellent”', tone: 'down' },
-          { big: '1 in 4', label: 'average recession odds · 72 economists (WSJ)', tone: 'down' },
-        ]) as StatItem[];
-
   if (mode === 'vs' || mode === 'vs-punch') {
     // PHASE-5 (the vs frames are the ones the feed board named "host cropped
     // or absent"): both panels step to 0.36W so the MOOD panel frees a
@@ -1286,9 +1425,10 @@ export function splitNumbersScene(g: SceneCtx): void {
     const vsW = W * 0.36;
     const delay = 300;
     drawNumberPanel(g, W * 0.06, py - 22, vsW, panelH, String(s.leftKicker ?? 'THE MARKET'), leftStats, t, 0);
-    // U-16: the host stands at W*0.87 — the MOOD labels wrap 160px short of
-    // the panel's right edge so no label terminates inside his head zone
-    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay, vsW - 160);
+    // U-16 + D-05/D-08 (THE LABEL PLATE FIX): the host stands at 0.885W —
+    // the MOOD labels now wrap 200px short of the panel's right edge so
+    // no label line terminates inside the figure's head zone.
+    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay, vsW - 200);
     // PHASE 3 COMPOSITION (Fix 1 — DATA-BEAT HERO FLOOR): the vs beat's
     // hero object is the two-panel data system — x 0.06W→0.905W × panelH:
     // 1622×~370 = 28.7% of the frame, over the 18% floor (the harness
@@ -1303,10 +1443,13 @@ export function splitNumbersScene(g: SceneCtx): void {
     // arm's envelope stays clear of the frame edge. Guard sweep re-arbitrates.
     // PHASE 3 COMPOSITION (Fix 1 — DATA-BEAT HERO FLOOR): the splitNumbers
     // vs beat's hero is the TWO-PANEL DATA SYSTEM (registered below at
-    // 32%) — the host is its presenter at the certified 1.5 side band
-    // (the 1.9 subject raise broke the frame-edge envelope the guard
-    // certified at 1.5).
-    drawStickmanV2(ctx, W * 0.87, H * 0.63, 1.5, t, {
+    // 32%) — the host is its presenter at the certified 1.5 side band.
+    // D-05/D-08 companion (THE LABEL PLATE FIX): the host steps to 0.885W
+    // and his ground drops to 0.64H — his head zone clears the mood
+    // labels' second line, which (with the wrap width below) now wraps
+    // BEFORE his column instead of running under his chin (the audit's
+    // b084 frame shipped the labels plated INTO the figure).
+    drawStickmanV2(ctx, W * 0.885, H * 0.64, 1.5, t, {
       pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
       sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes }),
       alpha: clamp01((t - 500) / 500),
@@ -1563,13 +1706,17 @@ function drawNumberPanel(
   const ROW_TOP = 130; // first numeral's cap sits ~40px under the accent rail
   const NUM_OFF = 56;  // numeral baseline below the row origin
   const LBL_OFF = 94;  // label baseline below the row origin
-  const DESC = 8;      // 34px Inter descender allowance
+  const DESC = 8;      // label descender allowance
   setFont(ctx, 34, 600); // measure at the RENDER size (was 25 — see note)
-  const statLines = stats.map((st) => wrapText(ctx, st.label, wrapW ?? w - 88, 34, 600).slice(0, 2));
+  // FIX D-05 (THE READABLE BAND): the panel's label copy renders at 36px —
+  // the 34px band was the audit's grey-noise floor on the mood rows — and
+  // wraps at its true render size.
+  const LBL_SIZE = 36;
+  const statLines = stats.map((st) => wrapText(ctx, st.label, wrapW ?? w - 88, LBL_SIZE, 600).slice(0, 2));
   const maxLines = Math.max(1, ...statLines.map((ls) => ls.length));
-  const rowH = LBL_OFF + (maxLines - 1) * 32 + DESC;
+  const rowH = LBL_OFF + (maxLines - 1) * 36 + DESC;
   const nStats = stats.length;
-  let rowGap = statLines.some((ls) => ls.length > 1) ? 138 : 118;
+  let rowGap = statLines.some((ls) => ls.length > 1) ? 140 : 118;
   if (nStats > 1) {
     const maxGap = Math.floor((h - CARD_TEXT_PAD_BOTTOM - ROW_TOP - rowH) / (nStats - 1));
     rowGap = Math.min(rowGap, Math.max(88, maxGap));
@@ -1597,20 +1744,20 @@ function drawNumberPanel(
     // with the font SET BEFORE the first measurement.
     let lines = statLines[i];
     const stackedBottom = ROW_TOP + (nStats - 1) * rowGap + rowH;
-    let lblSize = 34;
+    let lblSize = LBL_SIZE;
     setFont(ctx, lblSize, 600);
     if (lines.length > 1 && stackedBottom > h - CARD_TEXT_PAD_BOTTOM) {
       // U-16: the shrink measures against the SAME wrap width the stack
       // used (wrapW) — a host-adjacent panel's single-line label must
       // shrink, not stretch back under the figure's head zone
-      while (ctx.measureText(st.label).width > (wrapW ?? w - 88) && lblSize > 24) {
+      while (ctx.measureText(st.label).width > (wrapW ?? w - 88) && lblSize > 26) {
         lblSize -= 1;
         setFont(ctx, lblSize, 600);
       }
       lines = [st.label];
     }
     ctx.fillStyle = PALETTE.inkSoft;
-    lines.forEach((ln, j) => ctx.fillText(ln, x + 44, sy + LBL_OFF + j * 32));
+    lines.forEach((ln, j) => ctx.fillText(ln, x + 44, sy + LBL_OFF + j * 36));
     // PHASE-0 §7-D6: register the row so the cardPad assert checks this
     // plate's text-vs-card-edge every frame (the guard class that was
     // missing when the descender clip shipped).
@@ -1618,7 +1765,7 @@ function drawNumberPanel(
     // not the column — the figure-vs-display-type pass arbitrates against
     // real ink, so a host-adjacent panel is judged by what it prints.
     const rowTop = sy + NUM_OFF - 62;
-    const lastBaseline = sy + LBL_OFF + (lines.length - 1) * 32;
+    const lastBaseline = sy + LBL_OFF + (lines.length - 1) * 36;
     const inkW = Math.max(...lines.map((ln) => ctx.measureText(ln).width), st.big.length * 40, 120);
     registerText(
       `splitNum:${kicker}:${i}`,

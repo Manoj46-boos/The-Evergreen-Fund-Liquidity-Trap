@@ -162,6 +162,23 @@ function ledgerRow(
   return Math.min(3, lines.length) * 44;
 }
 
+/**
+ * 100-JUDGE VISUAL AUDIT (defect D-03 — STATIC HOLDS OF 3-7 SECONDS):
+ * "inside a group the build finishes in 1-2 seconds and then the frame
+ * sits." The fix is the BUILD SPREAD: row i's arrival time now scales
+ * with the SCENE GROUP's own duration, so a 20-second hold keeps landing
+ * content through it instead of finishing its build at t=1.5s and sitting
+ * for the rest. Deterministic in (i, n, d) — scrub-safe, no teleports,
+ * and short groups keep today's fast builds (span floor 500ms).
+ * Returns the arrival ms for row i of n.
+ */
+function holdBeat(g: SceneCtx, i: number, n: number, frac = 0.55): number {
+  const d = Math.max(1, g.d);
+  const span = Math.min(Math.max(d * frac - 400, 500), 6800);
+  const step = n > 1 ? span / (n - 1) : span;
+  return 300 + Math.min(i * step, span);
+}
+
 // ── statReveal — the 5% cold open ────────────────────────────────────────────
 export function statRevealScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
@@ -193,11 +210,15 @@ export function statRevealScene(g: SceneCtx): void {
   declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
 
   // headline kicker
+  // 100-JUDGE VISUAL AUDIT (defect D-04 — THE FIRST-FRAME CONTRACT): the
+  // cold open's kicker is UP at frame 0 — the film's business card reads
+  // what the film is about from pixel one (the white fade-in veil that
+  // used to cover frame zero is gone at the director level).
   setFont(ctx, LABEL_FLOOR, 700);
   ctx.fillStyle = PALETTE.goldInk;
   ctx.textAlign = 'left';
   const kick = 'THE EVERGREEN FUND · THE 5% QUESTION';
-  const kickE = easeOutCubic(clamp01(t / 500));
+  const kickE = coldOpen ? 1 : easeOutCubic(clamp01(t / 500));
   ctx.globalAlpha = kickE;
   ctx.fillText(kick, 180, 168);
   ctx.globalAlpha = 1;
@@ -252,8 +273,12 @@ export function statRevealScene(g: SceneCtx): void {
     // BEAT 3 — the strike-through and the resolution
     const strikeP = clamp01((bt - 4000) / 500);
     const resolveP = clamp01((bt - 4500) / 300);
-    // slot 1: the million, present from 0.5s
-    const mE = easeOutCubic(clamp01((bt - 500) / 800));
+    // slot 1: the million — PRESENT FROM FRAME 0 on the cold open (the
+    // D-04 first-frame contract: the $1,000,000 is the film's opening
+    // promise; the landing squash + impact ring carry the arrival energy
+    // the old fade used to fake, and the strike-through at 4s still has
+    // a live number to cut).
+    const mE = coldOpen ? 1 : easeOutCubic(clamp01((bt - 500) / 800));
     if (mE > 0) {
       ctx.save();
       ctx.globalAlpha = mE * (1 - 0.72 * resolveP); // the struck ghost demotes
@@ -290,8 +315,9 @@ export function statRevealScene(g: SceneCtx): void {
         ctx.stroke();
         ctx.restore();
       }
-      // the label under slot 1 — swaps with the number
-      const lE = easeOutCubic(clamp01((bt - 500) / 800));
+      // the label under slot 1 — swaps with the number (up from frame 0
+      // on the cold open — the D-04 first-frame contract)
+      const lE = coldOpen ? 1 : easeOutCubic(clamp01((bt - 500) / 800));
       ctx.save();
       setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
       ctx.globalAlpha = lE * (1 - resolveP);
@@ -556,7 +582,14 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   const highlight = s.highlight ? String(s.highlight) : '';
   const mode = String(s.mode ?? 'focus');
   bg(g, { strength: 0.88 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06 — THE CAPTION DOUBLES WHAT IS ON
+  // SCREEN): the karaoke pill dedups against what THIS scene actually
+  // draws — the title + the focused wrapper's own words — not the scene
+  // key. Windows that repeat the on-screen copy stand down.
+  declareOnScreenHeadline(
+    (mode === 'gates' ? 'Gate language, made precise' : 'Four wrappers. Four different promises.') +
+    ' ' + WRAPPERS.map((wr) => `${wr.name} ${wr.promise}`).join(' ')
+  );
 
   // the scene title
   setFont(ctx, 54, 600);
@@ -566,6 +599,18 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   ctx.fillStyle = PALETTE.gold;
   ctx.fillRect(180, 246, 300, 6);
 
+  // 100-JUDGE VISUAL AUDIT (defect D-07 — ONE FRAMING HELD FOR VERY LONG
+  // RUNS): wrapperMatrix held ONE layout for 9 consecutive beats
+  // (b025-b040) with only a highlight chip moving. The scene now ROTATES
+  // ITS FRAMING on the run clock (the director's runIdx): even run = the
+  // host's LEFT rail (his column at the left edge); odd run = MIRRORED —
+  // the row shifts left and the host takes the RIGHT rail. Same content,
+  // same laws, a different composition every ~4-5 beats.
+  const framing = (g.runIdx ?? 0) % 2;
+  const rowLeft = framing === 0 ? 180 + 160 : 180;            // the row's first column x
+  const rowRight = framing === 0 ? W - 180 : W - 440;         // the row's last column right edge
+  const hostX = framing === 0 ? rowLeft - 72 : rowRight + 90; // the host rail
+
   if (mode === 'gates') {
     // three precision chips
     const rows = [
@@ -574,8 +619,10 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       { k: 'A SUSPENSION', v: 'a different event again — the program itself stops', tone: 'down' as const },
     ];
     rows.forEach((r, i) => {
+      // D-03: the three precision rows land across the hold (the build
+      // spread — a 13s gates beat no longer finishes its build at 1.7s)
       const y = H * 0.315 + i * 158;
-      const e = easeOutCubic(clamp01((t - 400 - i * 450) / 700));
+      const e = easeOutCubic(clamp01((t - holdBeat(g, i, 3)) / 700));
       if (e <= 0) return;
       ctx.save();
       ctx.globalAlpha = e;
@@ -584,7 +631,10 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       setFont(ctx, 50, 700, FONT_DISPLAY);
       ctx.fillStyle = TONE(r.tone).main;
       ctx.fillText(r.k, 300, y + 58, W - 620);
-      setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
+      // FIX D-05 (THE READABLE BAND): the description line rises to the
+      // 36px label band — the gate's smallest body copy stops sitting at
+      // the bare floor
+      setFont(ctx, Math.max(LABEL_FLOOR, 36), 400);
       ctx.fillStyle = PALETTE.inkSoft;
       ctx.fillText(r.v, 300, y + 104, W - 620);
     });
@@ -595,26 +645,33 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   // U7: the row shifts right 180 → 340 — the freed left rail is the HOST's
   // stage (he leans on the focused card's edge from his own column; the
   // matrix never plates him and he never plates the matrix).
+  // D-07: on the mirrored framing the row OWNS the left margin and the
+  // host takes the right rail (same widths, opposite rails).
   const n = WRAPPERS.length;
   const gap = 34;
   const top = H * 0.285;
   const bot = CAPTION_ZONE_TOP - 40;
   const railW = 160;
-  const fullW = (W - 360 - railW - gap * (n - 1)) / n;
+  const fullW = (rowRight - rowLeft - gap * (n - 1)) / n;
   // the focused column takes 2.2× — the OTHERS shrink to fit the row
   const bigW = fullW * 1.9;
-  const othersW = (W - 360 - railW - gap * (n - 1) - bigW) / (n - 1);
+  const othersW = (rowRight - rowLeft - gap * (n - 1) - bigW) / (n - 1);
+  // the x of every column card() actually drew (for the lean declarations)
+  const cardAt: Record<number, number> = {};
   WRAPPERS.forEach((wr, i) => {
     const isFocus = mode === 'summary' ? true : i === focus;
     const cw = mode === 'summary' ? fullW : isFocus ? bigW : othersW;
     const othersBefore = mode === 'summary' ? 0 : WRAPPERS.slice(0, i).reduce((acc, _, j) => acc + (j === focus ? bigW : othersW) + gap, 0);
-    const x = 180 + railW + othersBefore;
+    const x = rowLeft + othersBefore;
     const p = clamp01((t - 300 - i * 260) / 650);
     if (p <= 0) return;
     ctx.save();
     ctx.globalAlpha = easeOutCubic(p);
     if (isFocus || mode === 'summary') {
       card(ctx, x, top, cw, bot - top, { r: 30, glow: isFocus ? rgba(PALETTE.gold, 0.22) : undefined });
+      // the card()'s auto-registered rect (card@x,top) — remember the ones
+      // the host's lean can touch (the near-edge column per framing)
+      if (i === 0 || i === n - 1 || mode === 'summary') cardAt[i] = x;
     } else {
       // unfocused columns are FURNITURE — same glass paint, no content
       // registration (they are deliberately dimmed; the guard checks reading
@@ -660,42 +717,46 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       // the dimmed / summary column — the promise only
       // U9 (STANDARD MARKET VISUAL REVIEW — defect D21, FEED-PROOF THE
       // MATRIX): the unfocused column alpha 0.62 → 0.85 (at 320px the old
-      // 0.62 was ~6px of gray-on-navy mush) and the body copy caps at TWO
-      // 40px lines — the rest carried by narration. The columns read at
-      // the feed as designed furniture, not as dissolving slabs.
-      setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
-      const lines = wrapText(ctx, isFocus && mode === 'summary' ? wr.promise.split('.')[0] + '.' : wr.promise.split('.')[0] + '.', cw - 68, 40, 400);
+      // 0.62 was ~6px of gray-on-navy mush).
+      // FIX D-05 (THE READABLE BAND): the promise copy renders at 44px —
+      // the feed's 40px floor was the audit's measured grey-noise band —
+      // and caps at TWO lines (the rest carried by narration).
+      setFont(ctx, 44, 400);
+      const lines = wrapText(ctx, isFocus && mode === 'summary' ? wr.promise.split('.')[0] + '.' : wr.promise.split('.')[0] + '.', cw - 68, 44, 400);
       ctx.fillStyle = PALETTE.ink;
       lines.slice(0, 2).forEach((ln, li) => {
         ctx.globalAlpha = easeOutCubic(clamp01(p * 1.4)) * (isFocus && mode === 'summary' ? 1 : 0.85);
-        ctx.fillText(ln, x + 34, top + 140 + li * 50, cw - 68);
+        ctx.fillText(ln, x + 34, top + 146 + li * 54, cw - 68);
       });
       ctx.globalAlpha = 1;
     }
   });
   // ── U7 (defect D19, THE HOST LEANS ON THE FOCUSED CARD) — the matrix's
-  // own presenter stands in the LEFT RAIL (his own column) and the near
-  // hand palms the focused card's left edge at mid-height — the card is a
-  // desk he leans on, never a slide he stands beside. The palm POINT is
-  // below the colHead text zone; the card's own register is declared as
-  // the designed contact so the lean reads clean to the guard.
+  // own presenter stands in his rail and the near hand palms the focused
+  // card's edge at mid-height — the card is a desk he leans on, never a
+  // slide he stands beside. D-07: the rail follows the framing (left on
+  // even runs, right on odd runs).
   if (mode !== 'gates') {
-    // the host leans on THE ROW's left edge (340 — always the first
-    // column's edge): focus 0 that IS the focused card; focus 1-3 he
-    // leans on the row while presenting the focused column (gaze right).
-    registerRect('wrapperMatrix:focusEdge', 332, top + 150, 26, 260);
-    financeHost(g, 268, H * 0.65, 1.6, {
-      seed: 6.1,
+    // the host leans on THE ROW's near edge — focus 0 that IS the focused
+    // card; focus 1-3 he leans on the row while presenting the focused
+    // column (gaze toward it).
+    registerRect('wrapperMatrix:focusEdge', framing === 0 ? rowLeft - 8 : rowRight - 18, top + 150, 26, 260);
+    financeHost(g, hostX, H * 0.65, 1.6, {
+      seed: 6.1 + framing * 0.9,
       gesture: 'present',
-      glanceBias: 0.9,
-      contact: { x: 338, y: top + 240, hand: 'palm', easeAt: 0 },
+      glanceBias: framing === 0 ? 0.9 : -0.9,
+      contact: { x: framing === 0 ? rowLeft - 2 : rowRight + 4, y: top + 240, hand: 'palm', easeAt: 0 },
       declareId: 'wrapperMatrix:focusEdge',
       label: 'matrix-host',
       hostBody: true,
     });
-    // focus 0: the leaned card IS the focused card — declare its register
-    // so the lean is a designed contact, not a body-vs-content violation.
-    if (mode === 'summary' || focus === 0) declareHostContact(`card@340,${Math.round(top)}`);
+    // the leaned column's card (when card() actually drew one there) joins
+    // the designed-contact set — framing 0 leans on column 0's left edge,
+    // framing 1 on the LAST column's right edge, summary on the whole row.
+    const leanIdx = framing === 0 ? 0 : n - 1;
+    if ((mode === 'summary' || focus === leanIdx) && cardAt[leanIdx] !== undefined) {
+      declareHostContact(`card@${Math.round(cardAt[leanIdx])},${Math.round(top)}`);
+    }
   }
   // summary mode: the shelf line
   if (mode === 'summary') {
@@ -726,7 +787,9 @@ export function flowLiquidityScene(g: SceneCtx): void {
   const mode = String(s.mode ?? 'sources');
   const highlight = s.highlight ? String(s.highlight) : '';
   bg(g, { strength: 0.9 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06): declare the plumbing's words.
+  declareOnScreenHeadline((mode === 'stress' ? 'The combined stress test ' : 'Where the cash comes from ') +
+    SOURCES.map((src) => `${src.k} ${src.v}`).join(' '));
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
@@ -764,9 +827,10 @@ export function flowLiquidityScene(g: SceneCtx): void {
     }
   });
   // the source stack
+  // D-03: the five sources land across the hold (the build spread)
   SOURCES.forEach((src, i) => {
     const y = top + i * rowH;
-    const e = easeOutCubic(clamp01((t - 300 - i * 240) / 600));
+    const e = easeOutCubic(clamp01((t - holdBeat(g, i, SOURCES.length, 0.5)) / 600));
     if (e <= 0) return;
     ctx.save();
     ctx.globalAlpha = e;
@@ -939,6 +1003,10 @@ export function prorationDemoScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   const stage = Number(s.stage ?? 0);
   bg(g, { strength: 0.9 });
+  // 100-JUDGE VISUAL AUDIT (defect D-06 — the audit's b049 frame: the pill
+  // printed "REQUESTED vs FULFILLED" while the title carried the same
+  // words): the scene declares what it draws.
+  declareOnScreenHeadline('REQUESTED ≠ FULFILLED YOU REQUESTED $100,000 YOU RECEIVED $50,000 DENOMINATOR: 5% OF SHARES');
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
@@ -1069,9 +1137,29 @@ export function caseFilesScene(g: SceneCtx): void {
   const quarter = s.quarter ? String(s.quarter) : '';
   const highlight = s.highlight ? String(s.highlight) : '';
   bg(g, { strength: 0.88 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
 
   const c = CASES[caseIdx];
+  // 100-JUDGE VISUAL AUDIT (defect D-06 — THE CAPTION DOUBLES WHAT IS ON
+  // SCREEN): the dossier declares what it actually prints — the fund, the
+  // tabs, every stat — so karaoke windows that repeat the on-screen copy
+  // stand down instead of double-reading it.
+  declareOnScreenHeadline(
+    c.fund + ' ' + CASES.map((cc) => `CASE ${cc.tab}`).join(' ') + ' ' +
+    c.stats.map((st) => `${st.big} ${st.label}`).join(' ')
+  );
+
+  // 100-JUDGE VISUAL AUDIT (defect D-07 — ONE FRAMING HELD FOR VERY LONG
+  // RUNS): caseFiles held ONE dossier layout for 15 consecutive beats
+  // (b057-b071). The scene now rotates THREE framings on the run clock:
+  //   A (runIdx %3 == 0) — THE DOSSIER (operator right, as shipped)
+  //   B (%3 == 1) — THE MIRRORED DOSSIER (operator LEFT, cover hinge left)
+  //   C (%3 == 2) — THE READ-OUT (no operator: full-width header strip +
+  //                 the case's stats as a hero cell grid — a pure data
+  //                 beat between the operator framings)
+  // Same facts, same dossier metaphor, three compositions — the middle of
+  // the film stops being a slideshow.
+  const framing = (g.runIdx ?? 0) % 3;
+
   // the three tabs
   const tabW = (W - 360 - 48) / 3;
   CASES.forEach((cc, i) => {
@@ -1093,62 +1181,11 @@ export function caseFilesScene(g: SceneCtx): void {
     ctx.restore();
   });
 
-  // the case card
-  // VAULT NOIR fix: the card bottom rises to CAPTION_ZONE_TOP − 51 (749) —
-  // at −30 (770) the registered bottom crossed the 2-row pill under the
-  // certified camera (sweep @720-872s, 10-12px).
-  // U8 (STANDARD MARKET VISUAL REVIEW — THE DOSSIER): the case card OPENS
-  // — a top flap unfolds over the first 700ms (scaleY settle + a fold
-  // seam), so the beat reads as a dossier being opened, not a card
-  // fading in. U1: the card narrows and the OPERATOR opens it — the
-  // host's palm rests on the dossier's right edge while it unfolds.
   const top = H * 0.30;
   const bot = CAPTION_ZONE_TOP - 51;
-  const cardRight = W - 440;
-  const e0 = easeOutCubic(clamp01((t - 350) / 650));
-  const flapP = easeOutCubic(clamp01((t - 350) / 700));
-  ctx.save();
-  ctx.globalAlpha = e0;
-  // the open flap — a vertical scaleX settle from the right hinge (the
-  // dossier cover swinging open toward the host)
-  ctx.save();
-  ctx.translate(cardRight, 0);
-  ctx.scale(0.55 + 0.45 * flapP, 1);
-  ctx.translate(-cardRight, 0);
-  card(ctx, 180, top, cardRight - 180, bot - top, { r: 34, glow: rgba(PALETTE.gold, 0.14) });
-  ctx.restore();
-  // the fold seam — the one line a real dossier HAS (fades as it opens)
-  if (flapP < 0.98) {
-    ctx.strokeStyle = rgba(PALETTE.ink, 0.5 * (1 - flapP));
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(cardRight - 4, top + 10);
-    ctx.lineTo(cardRight - 4, bot - 10);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // the fund name + structure chip
-  setFont(ctx, 50, 700, FONT_DISPLAY);
-  ctx.fillStyle = PALETTE.ink;
-  ctx.fillText(c.fund, 236, top + 78, W - 480);
-  chip(ctx, c.chip, 236, top + 104, {
-    bg: PALETTE.chipBg, fg: TONE(c.tone).main, border: rgba(TONE(c.tone).main, 0.6), size: LABEL_FLOOR, iconDot: TONE(c.tone).main,
-  });
-
-  // the stat rows
-  // VAULT NOIR fix: rows compact (146 header + 126 pitch) and the tag chip
-  // clamps to the card bottom — the old 165/140 pitch put the second stat's
-  // tag chip past the card under 2-line labels.
-  // U8 (THE SLAM): each stat row's big numeral SLAMS in — microShake at
-  // the row + an impactRing from the numeral at the entry instant. The
-  // dossier's numbers HIT like stamps (the review: "the 1% chips slam in
-  // with impactRing + microShake — both exist").
-  let sy = top + 146;
-  const rowAdvance = 126;
   const chipClamp = (x: number, text: string, size: number): number => {
     const wch = chipWidth(ctx, text, { size, padX: 22 });
-    return Math.min(x, cardRight - wch);
+    return Math.min(x, W - 180 - wch);
   };
   const showIdx = (i: number): boolean =>
     quarter === 'Q1' || quarter === 'r0' ? i === 0
@@ -1156,46 +1193,171 @@ export function caseFilesScene(g: SceneCtx): void {
     : quarter === 'r2' ? i === 2
     : quarter === 'both' ? i <= 1
     : true;
-  c.stats.forEach((st, i) => {
-    if (quarter === 'intro') return;
-    if (!showIdx(i)) return;
-    const e = easeOutCubic(clamp01((t - 700 - i * 500) / 650));
-    if (e <= 0) return;
-    const landT = 700 + i * 500 + 650;
-    const shake = microShake(t, landT, 4.5);
+  const shownStats = c.stats.filter((_, i) => quarter !== 'intro' && showIdx(i));
+
+  // ── the D-03 BUILD SPREAD: stat rows land across the HOLD (arrival i
+  // scales with the group's duration), so a 24-second dossier keeps
+  // dealing numbers through the hold instead of finishing at 1.5s.
+  const statAt = (i: number): number => holdBeat(g, i, Math.max(1, shownStats.length), 0.6);
+
+  if (framing === 2) {
+    // ══ FRAMING C — THE READ-OUT ══
+    // the header strip — fund + structure chip, full width
+    const hsBot = 430;
+    const e0 = easeOutCubic(clamp01((t - 350) / 650));
     ctx.save();
-    ctx.translate(shake.dx, shake.dy);
-    ctx.globalAlpha = e;
-    // the big stat + tag
-    setFont(ctx, 84, 700, FONT_DISPLAY);
-    ctx.fillStyle = TONE(i === 1 && highlight === 'par' ? 'up' : c.tone).main;
-    const bigW2 = Math.min(ctx.measureText(st.big).width, 280);
-    ctx.fillText(st.big, 240, sy + 62);
-    // U8: the impact ring from the numeral at the landing instant
-    impactRing(ctx, 240 + bigW2 * 0.5, sy + 34, t, landT, 110, 1.1, TONE(c.tone).main);
-    // the label
-    setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
-    const lines = wrapText(ctx, st.label, cardRight - 300 - bigW2, 40, 400);
+    ctx.globalAlpha = e0;
+    card(ctx, 180, 300, W - 360, hsBot - 300, { r: 30, glow: rgba(PALETTE.gold, 0.14) });
+    ctx.restore();
+    setFont(ctx, 50, 700, FONT_DISPLAY);
     ctx.fillStyle = PALETTE.ink;
-    lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, 240 + bigW2 + 56, sy + 26 + li * 50));
-    // the tag chip — clamped inside the card
-    if (st.tag) {
-      const tagSize = Math.max(LABEL_FLOOR, 34);
-      const tagY = Math.min(sy + 26 + Math.min(lines.slice(0, 2).length, 2) * 50 + 6, bot - 70);
-      chip(ctx, st.tag.toUpperCase(), chipClamp(240 + bigW2 + 56, st.tag.toUpperCase(), tagSize), tagY, {
-        bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.5), size: tagSize,
+    ctx.fillText(c.fund, 236, 368, W - 800);
+    // the chip RIGHT-ALIGNS inside the safe margin (the audit caught it
+    // clipped at the frame edge under the exit camera when left-anchored)
+    {
+      const chipTxt = c.chip;
+      const cw2 = chipWidth(ctx, chipTxt, { size: LABEL_FLOOR, padX: 22 });
+      chip(ctx, chipTxt, W - 180 - cw2 - 24, 334, {
+        bg: PALETTE.chipBg, fg: TONE(c.tone).main, border: rgba(TONE(c.tone).main, 0.6), size: LABEL_FLOOR, iconDot: TONE(c.tone).main,
       });
     }
+    // the stat cells — the numbers take the stage at 96px
+    const cellW = (W - 360 - 48) / Math.max(1, shownStats.length);
+    shownStats.forEach((st, i) => {
+      const e = easeOutCubic(clamp01((t - statAt(i)) / 650));
+      if (e <= 0) return;
+      const landT = statAt(i) + 650;
+      const shake = microShake(t, landT, 4.5);
+      const cx0 = 180 + i * (cellW + 24);
+      ctx.save();
+      ctx.translate(shake.dx, shake.dy);
+      ctx.globalAlpha = e;
+      card(ctx, cx0, 470, cellW, 220, { r: 28, tint: TONE(c.tone).main });
+      setFont(ctx, 96, 700, FONT_DISPLAY);
+      ctx.fillStyle = PALETTE.white;
+      const bigW3 = Math.min(ctx.measureText(st.big).width, cellW - 64);
+      ctx.fillText(st.big, cx0 + 36, 470 + 86, cellW - 64);
+      impactRing(ctx, cx0 + 36 + bigW3 * 0.5, 470 + 56, t, landT, 110, 1.1, TONE(c.tone).main);
+      setFont(ctx, Math.max(LABEL_FLOOR, 36), 400);
+      ctx.fillStyle = PALETTE.ink;
+      const lines = wrapText(ctx, st.label, cellW - 64, 36, 400);
+      lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, cx0 + 36, 470 + 128 + li * 42));
+      ctx.restore();
+    });
+  } else {
+    // ══ FRAMINGS A + B — THE DOSSIER (operator right / operator left) ══
+    const mirrored = framing === 1;
+    // VAULT NOIR fix: the card bottom rises to CAPTION_ZONE_TOP − 51 (749) —
+    // at −30 (770) the registered bottom crossed the 2-row pill under the
+    // certified camera (sweep @720-872s, 10-12px).
+    // U8: the case card OPENS — a flap unfolds over the first 700ms, so
+    // the beat reads as a dossier being opened. The hinge follows the
+    // framing (right on A, left on B — the cover swings toward the operator).
+    const cardLeft = mirrored ? 440 : 180;
+    const cardRight = mirrored ? W - 180 : W - 440;
+    const e0 = easeOutCubic(clamp01((t - 350) / 650));
+    const flapP = easeOutCubic(clamp01((t - 350) / 700));
+    ctx.save();
+    ctx.globalAlpha = e0;
+    const hinge = mirrored ? cardLeft : cardRight;
+    ctx.save();
+    ctx.translate(hinge, 0);
+    ctx.scale(0.55 + 0.45 * flapP, 1);
+    ctx.translate(-hinge, 0);
+    card(ctx, cardLeft, top, cardRight - cardLeft, bot - top, { r: 34, glow: rgba(PALETTE.gold, 0.14) });
     ctx.restore();
-    sy += rowAdvance;
-  });
-  // the "both dates" verdict band
+    // the fold seam — fades as it opens
+    if (flapP < 0.98) {
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.5 * (1 - flapP));
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(hinge + (mirrored ? 4 : -4), top + 10);
+      ctx.lineTo(hinge + (mirrored ? 4 : -4), bot - 10);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // the fund name + structure chip
+    const innerX = cardLeft + 56;
+    setFont(ctx, 50, 700, FONT_DISPLAY);
+    ctx.fillStyle = PALETTE.ink;
+    ctx.fillText(c.fund, innerX, top + 78, cardRight - cardLeft - 112);
+    chip(ctx, c.chip, innerX, top + 92, {
+      bg: PALETTE.chipBg, fg: TONE(c.tone).main, border: rgba(TONE(c.tone).main, 0.6), size: LABEL_FLOOR, iconDot: TONE(c.tone).main,
+    });
+
+    // the stat rows — VAULT NOIR compact pitch, U8 SLAM, D-05 readable
+    // band (44px labels), D-03 spread (rows land across the hold).
+    // THE OVERLAP FIX: the header chip's body (top+92 .. ≈top+148) used
+    // to fight the first numeral's cap (the BCRED "Q1" printed ON the
+    // chip) — rows start at top+168, one clear band below the chip.
+    let sy = top + 168;
+    const rowAdvance = 126;
+    // the verdict chip's band: when a verdict chip lands this beat, the
+    // tag chips clamp ABOVE it (the audit frame shipped the verdict chip
+    // plating the tag chip "MARCH 2026 SEC FILING")
+    const verdictLands = quarter === 'both' || quarter === 'liquidity'
+      || highlight === 'denominator' || highlight === 'halt';
+    const tagCeil = verdictLands ? bot - 150 : bot - 70;
+    c.stats.forEach((st, i) => {
+      if (quarter === 'intro') return;
+      if (!showIdx(i)) return;
+      const e = easeOutCubic(clamp01((t - statAt(i)) / 650));
+      if (e <= 0) return;
+      const landT = statAt(i) + 650;
+      const shake = microShake(t, landT, 4.5);
+      ctx.save();
+      ctx.translate(shake.dx, shake.dy);
+      ctx.globalAlpha = e;
+      // the big stat + tag
+      setFont(ctx, 84, 700, FONT_DISPLAY);
+      ctx.fillStyle = TONE(i === 1 && highlight === 'par' ? 'up' : c.tone).main;
+      const bigW2 = Math.min(ctx.measureText(st.big).width, 280);
+      ctx.fillText(st.big, cardLeft + 60, sy + 62);
+      // U8: the impact ring from the numeral at the landing instant
+      impactRing(ctx, cardLeft + 60 + bigW2 * 0.5, sy + 34, t, landT, 110, 1.1, TONE(c.tone).main);
+      // the label
+      setFont(ctx, Math.max(TYPE_FLOOR, 44), 400);
+      const lines = wrapText(ctx, st.label, cardRight - 60 - (cardLeft + 60 + bigW2 + 56), 44, 400);
+      ctx.fillStyle = PALETTE.ink;
+      lines.slice(0, 2).forEach((ln, li) => ctx.fillText(ln, cardLeft + 60 + bigW2 + 56, sy + 26 + li * 52));
+      // the tag chip — clamped inside the card (and above any verdict chip)
+      if (st.tag) {
+        const tagSize = Math.max(LABEL_FLOOR, 34);
+        const tagY = Math.min(sy + 26 + Math.min(lines.slice(0, 2).length, 2) * 52 + 8, tagCeil);
+        chip(ctx, st.tag.toUpperCase(), chipClamp(cardLeft + 60 + bigW2 + 56, st.tag.toUpperCase(), tagSize), tagY, {
+          bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.5), size: tagSize,
+        });
+      }
+      ctx.restore();
+      sy += rowAdvance;
+    });
+    // U1/U7: the OPERATOR opens the dossier — palm ON the card's near
+    // edge; the edge follows the framing (A: right edge, B: left edge).
+    const edgeX = mirrored ? cardLeft - 4 : cardRight - 4;
+    registerRect('caseFiles:dossierEdge', edgeX, top + 140, 22, 320);
+    financeHost(g, mirrored ? cardLeft - 130 : cardRight + 130, H * 0.65, 1.7, {
+      seed: 8.9 + framing * 0.7,
+      gesture: 'present',
+      glanceBias: mirrored ? 0.9 : -0.9,
+      contact: { x: mirrored ? cardLeft + 2 : cardRight + 2, y: top + 250, hand: 'palm', easeAt: 800 },
+      declareId: 'caseFiles:dossierEdge',
+      label: 'dossier-host',
+      hostBody: true,
+    });
+  }
+  // the verdict chips (all framings share the band) — the chip X follows
+  // the framing (mirrored B: the card's inner left edge; the shipped fixed
+  // 240 landed INSIDE the mirrored operator's body band) and on framing C
+  // it drops BELOW the stat cells (the shipped band plated their bottoms).
+  const verdictX = framing === 1 ? 500 : 240;
+  const verdictY = framing === 2 ? 706 : bot - 100;
   if (quarter === 'both') {
     const e = easeOutCubic(clamp01((t - 1500) / 650));
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, 'BOTH STATEMENTS WERE TRUE — AT DIFFERENT DATES', 240, bot - 100, {
+      chip(ctx, 'BOTH STATEMENTS WERE TRUE — AT DIFFERENT DATES', verdictX, verdictY, {
         bg: PALETTE.chipBg, fg: PALETTE.goldInk, border: rgba(PALETTE.gold, 0.75), size: LABEL_FLOOR, iconDot: PALETTE.goldDisplay,
       });
       ctx.restore();
@@ -1205,7 +1367,7 @@ export function caseFilesScene(g: SceneCtx): void {
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, '$15B+ LIQUIDITY \u2260 AN UNCONDITIONAL EXIT RIGHT', chipClamp(240, '$15B+ LIQUIDITY \u2260 AN UNCONDITIONAL EXIT RIGHT', LABEL_FLOOR), bot - 100, {
+      chip(ctx, '$15B+ LIQUIDITY \u2260 AN UNCONDITIONAL EXIT RIGHT', chipClamp(verdictX, '$15B+ LIQUIDITY \u2260 AN UNCONDITIONAL EXIT RIGHT', LABEL_FLOOR), verdictY, {
         bg: PALETTE.chipBg, fg: PALETTE.downVivid, border: rgba(PALETTE.down, 0.7), size: LABEL_FLOOR, iconDot: PALETTE.down,
       });
       ctx.restore();
@@ -1215,7 +1377,7 @@ export function caseFilesScene(g: SceneCtx): void {
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, 'THE QUARTER · THE DENOMINATOR · THE BOARD\u2019S CALL · THE FULFILMENT', chipClamp(240, 'THE QUARTER · THE DENOMINATOR · THE BOARD\u2019S CALL · THE FULFILMENT', LABEL_FLOOR), bot - 100, {
+      chip(ctx, 'THE QUARTER · THE DENOMINATOR · THE BOARD\u2019S CALL · THE FULFILMENT', chipClamp(verdictX, 'THE QUARTER · THE DENOMINATOR · THE BOARD\u2019S CALL · THE FULFILMENT', LABEL_FLOOR), verdictY, {
         bg: PALETTE.chipBg, fg: PALETTE.inkSoft, border: PALETTE.cardBorder, size: LABEL_FLOOR,
       });
       ctx.restore();
@@ -1225,26 +1387,14 @@ export function caseFilesScene(g: SceneCtx): void {
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      chip(ctx, 'TENDERS REPLACED BY RATABLE RETURN-OF-CAPITAL', chipClamp(240, 'TENDERS REPLACED BY RATABLE RETURN-OF-CAPITAL', LABEL_FLOOR), bot - 100, {
+      chip(ctx, 'TENDERS REPLACED BY RATABLE RETURN-OF-CAPITAL', chipClamp(verdictX, 'TENDERS REPLACED BY RATABLE RETURN-OF-CAPITAL', LABEL_FLOOR), verdictY, {
         bg: PALETTE.chipBg, fg: PALETTE.downVivid, border: rgba(PALETTE.down, 0.7), size: LABEL_FLOOR, iconDot: PALETTE.down,
       });
       ctx.restore();
     }
   }
-  // U1/U7: the OPERATOR opens the dossier — the host's palm rests ON the
-  // case card's right edge while the flap unfolds and the numbers slam.
-  registerRect('caseFiles:dossierEdge', cardRight - 4, top + 140, 22, 320);
-  financeHost(g, cardRight + 130, H * 0.65, 1.7, {
-    seed: 8.9,
-    gesture: 'present',
-    glanceBias: -0.9,
-    contact: { x: cardRight + 2, y: top + 250, hand: 'palm', easeAt: 800 },
-    declareId: 'caseFiles:dossierEdge',
-    label: 'dossier-host',
-    hostBody: true,
-  });
   // U5: the auditor's line sweeps the dossier (the read is visible)
-  ledgerScan(ctx, 200, top + 20, cardRight - 200, bot - top - 40, t, 3.1);
+  ledgerScan(ctx, 200, top + 20, W - 400, bot - top - 40, t, 3.1);
   sourceTag(ctx, W, c.src);
 }
 
@@ -1254,7 +1404,10 @@ export function navGapScene(g: SceneCtx): void {
   const stage = Number(s.stage ?? 0);
   const hypothetical = s.hypothetical === true;
   bg(g, { strength: 0.88 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06): declare the towers' own words.
+  declareOnScreenHeadline(hypothetical
+    ? 'The mechanism, in its simplest form NAV 100 ECONOMIC 90 THE GAP = WHO BEARS IT'
+    : 'NAV is a valuation — not a market price GOVERNED THE METHODS THE FRICTION');
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
@@ -1469,7 +1622,9 @@ export function feeStackScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   const stage = Number(s.stage ?? 0);
   bg(g, { strength: 0.9 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06): declare the fee stack's own
+  // words so repeating caption windows stand down.
+  declareOnScreenHeadline('The fee stack — one fund\u2019s published terms ' + FEES.map((f) => `${f.k} ${f.v}`).join(' '));
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
@@ -1498,12 +1653,15 @@ export function feeStackScene(g: SceneCtx): void {
   ctx.restore();
 
   // the stacked layers
+  // D-03: the five layers DEAL across the hold (the build spread — a 26s
+  // feeStack beat lands its layers through the hold, not in 1.3s)
   const lx = 240;
   const lw = W * 0.52;
+  const feeRows = FEES.filter((f) => stage >= f.at);
   FEES.forEach((f, i) => {
     if (stage < f.at) return;
     const y = H * 0.305 + i * 92;
-    const fe = easeOutCubic(clamp01((t - 500 - i * 160) / 650));
+    const fe = easeOutCubic(clamp01((t - holdBeat(g, feeRows.indexOf(f), feeRows.length, 0.5)) / 650));
     if (fe <= 0) return;
     ctx.save();
     ctx.globalAlpha = fe;
@@ -1518,10 +1676,11 @@ export function feeStackScene(g: SceneCtx): void {
     ctx.lineWidth = 2;
     roundRect(ctx, lx, y, lw * (1 - i * 0.06), 84, 14);
     ctx.stroke();
-    setFont(ctx, LABEL_FLOOR, 700);
+    // FIX D-05 (THE READABLE BAND): the fee rows rise to the 36px band
+    setFont(ctx, Math.max(LABEL_FLOOR, 36), 700);
     ctx.fillStyle = PALETTE.ink;
     ctx.fillText(f.k, lx + 36, y + 34, lw - 72);
-    setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
+    setFont(ctx, Math.max(LABEL_FLOOR, 36), 400);
     ctx.fillStyle = PALETTE.inkSoft;
     ctx.fillText(f.v, lx + 36, y + 66, lw - 72);
     ctx.restore();
@@ -1593,7 +1752,8 @@ export function bullCaseScene(g: SceneCtx): void {
   const side = String(s.side ?? 'drawdown');
   const data = BULL[side as keyof typeof BULL] ?? BULL.drawdown;
   bg(g, { strength: 0.88 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06): declare the ledger's words.
+  declareOnScreenHeadline('The strongest honest bull case ' + data.title + ' ' + data.rows.join(' '));
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
@@ -1683,12 +1843,31 @@ export function auditChecklistScene(g: SceneCtx): void {
   const q = Number(s.q ?? 0);
   const mode = String(s.mode ?? 'question');
   bg(g, { strength: 0.9 });
+  // 100-JUDGE VISUAL AUDIT (defect D-06 — THE CAPTION DOUBLES WHAT IS ON
+  // SCREEN): the audit declares what it prints — the title, the focused
+  // question and its sub — so the karaoke pill stands down for windows
+  // that repeat them (the audit's b105 frame: the pill printed "the exact
+  // redemption language" while the card carried the same words).
+  declareOnScreenHeadline(
+    'The eight-question liquidity audit ' +
+    (q >= 0 && q < 8 ? `${AUDIT_QS[q].q} ${AUDIT_QS[q].sub}` : AUDIT_QS.map((qa) => qa.w).join(' '))
+  );
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;
   ctx.fillText('The eight-question liquidity audit', 180, 218, 1560);
   ctx.fillStyle = PALETTE.gold;
   ctx.fillRect(180, 246, 300, 6);
+
+  // 100-JUDGE VISUAL AUDIT (defect D-07 — ONE FRAMING HELD FOR VERY LONG
+  // RUNS): the audit held ONE rail-left layout for 10 consecutive beats
+  // (b104-b113). Three framings rotate on the run clock:
+  //   A (runIdx %3 == 0) — the rail LEFT + question card right (shipped)
+  //   B (%3 == 1) — MIRRORED: the rail RIGHT, question card left
+  //   C (%3 == 2) — THE ZOOM: the rail collapses to a compact progress
+  //                 strip under the title; the question card takes the
+  //                 full reading width and the question rises to 72px
+  const framing = (g.runIdx ?? 0) % 3;
 
   if (mode === 'words') {
     // the condensed eight words — the screenshot moment
@@ -1769,35 +1948,70 @@ export function auditChecklistScene(g: SceneCtx): void {
   // VAULT NOIR fix: the rail compresses to end at 740 — the old rowH ran
   // the eighth pill's registered bottom to 748, inside the pill band under
   // the certified camera envelope.
-  const railX = 180;
+  // D-07: the rail follows the framing — LEFT on A, RIGHT on B (pulled in
+  // to the 240px certified right margin — the exit camera's worst truck
+  // spends the thin side of the frame), and on C it collapses to a compact
+  // progress strip under the title (the zoom's full-width question card
+  // replaces the rail column).
+  const railX = framing === 0 ? 180 : framing === 1 ? W - 240 - 330 : 180;
   const railW = 330;
   const rowH = (CAPTION_ZONE_TOP - 100 - H * 0.30) / 8;
-  AUDIT_QS.forEach((qa, i) => {
-    const y = H * 0.30 + i * rowH;
-    const active = i === q;
-    const e = easeOutCubic(clamp01((t - 200 - i * 90) / 400));
-    if (e <= 0) return;
-    ctx.save();
-    ctx.globalAlpha = e;
-    if (active) {
-      card(ctx, railX, y + 4, railW, rowH - 16, { r: 18, glow: rgba(PALETTE.gold, 0.25) });
-    } else {
-      ctx.fillStyle = rgba(PALETTE.track, 0.5);
-      roundRect(ctx, railX, y + 4, railW, rowH - 16, 18);
-      ctx.fill();
-    }
-    setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
-    ctx.fillStyle = active ? PALETTE.goldDisplay : PALETTE.inkFaint;
-    ctx.fillText(`${i + 1} · ${qa.w}`, railX + 28, y + rowH / 2 - 2, railW - 50);
-    ctx.restore();
-  });
+  if (framing !== 2) {
+    AUDIT_QS.forEach((qa, i) => {
+      const y = H * 0.30 + i * rowH;
+      const active = i === q;
+      const e = easeOutCubic(clamp01((t - 200 - i * 90) / 400));
+      if (e <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = e;
+      if (active) {
+        card(ctx, railX, y + 4, railW, rowH - 16, { r: 18, glow: rgba(PALETTE.gold, 0.25) });
+      } else {
+        ctx.fillStyle = rgba(PALETTE.track, 0.5);
+        roundRect(ctx, railX, y + 4, railW, rowH - 16, 18);
+        ctx.fill();
+      }
+      setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
+      ctx.fillStyle = active ? PALETTE.goldDisplay : PALETTE.inkFaint;
+      ctx.fillText(`${i + 1} · ${qa.w}`, railX + 28, y + rowH / 2 - 2, railW - 50);
+      ctx.restore();
+    });
+  } else {
+    // the compact progress strip — eight numbered ticks under the title,
+    // the current question lit (the zoom's wayfinding)
+    const stripY = 292;
+    const tickW = 44;
+    AUDIT_QS.forEach((qa, i) => {
+      const x = 180 + i * (tickW + 12);
+      const active = i === q;
+      const e = easeOutCubic(clamp01((t - 200 - i * 70) / 400));
+      if (e <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = e;
+      if (active) {
+        card(ctx, x - 8, stripY - 6, tickW + 16, 46, { r: 14, glow: rgba(PALETTE.gold, 0.25) });
+      } else {
+        ctx.fillStyle = rgba(PALETTE.track, 0.5);
+        roundRect(ctx, x - 8, stripY - 6, tickW + 16, 46, 14);
+        ctx.fill();
+      }
+      setFont(ctx, Math.max(LABEL_FLOOR, 34), 700);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = active ? PALETTE.goldDisplay : PALETTE.inkFaint;
+      ctx.fillText(String(i + 1), x + tickW / 2 - 8 + 8, stripY + 26);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    });
+  }
   // the question card — the focused question, big
   if (q >= 0 && q < 8) {
     const qa = AUDIT_QS[q];
-    const qx = railX + railW + 70;
-    // U7: the card narrows to give the examiner his column (the host
-    // leans on its right edge — never plates the question text).
-    const qw = W - qx - 340;
+    // the card geometry follows the framing (the rail vars above carry A/B;
+    // framing C's card owns the full reading width). Framing B mirrors A's
+    // proportions: the card keeps A's ~1000px reading width on the LEFT,
+    // the host leans on ITS left edge from his own column.
+    const qx = framing === 0 ? railX + railW + 70 : framing === 1 ? 340 : 180;
+    const qw = framing === 2 ? W - 180 - 340 : framing === 1 ? railX - 70 - qx : W - qx - 340;
     const cardBot = CAPTION_ZONE_TOP - 90;
     const e0 = easeOutCubic(clamp01((t - 350) / 600));
     ctx.save();
@@ -1807,24 +2021,44 @@ export function auditChecklistScene(g: SceneCtx): void {
     setFont(ctx, 28, 700);
     ctx.fillStyle = PALETTE.goldInk;
     ctx.fillText(`QUESTION ${q + 1} OF 8`, qx + 48, H * 0.30 + 60);
-    setFont(ctx, 62, 700, FONT_DISPLAY);
+    // D-07 framing C: the ZOOM — the question rises to 72px on the full
+    // reading width (the audit's own "screenshot moment" register)
+    setFont(ctx, framing === 2 ? 72 : 62, 700, FONT_DISPLAY);
     ctx.fillStyle = PALETTE.ink;
-    const qLines = wrapText(ctx, qa.q, qw - 96, 62, 700);
-    qLines.forEach((ln, li) => ctx.fillText(ln, qx + 48, H * 0.30 + 140 + li * 72));
-    const subY = H * 0.30 + 150 + qLines.length * 72 + 20;
-    setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
-    const lines = wrapText(ctx, qa.sub, qw - 96, 40, 400);
+    const qLines = wrapText(ctx, qa.q, qw - 96, framing === 2 ? 72 : 62, 700);
+    qLines.forEach((ln, li) => ctx.fillText(ln, qx + 48, H * 0.30 + 140 + li * (framing === 2 ? 82 : 72)));
+    const qLineH = framing === 2 ? 82 : 72;
+    const subY = H * 0.30 + 150 + qLines.length * qLineH + 20;
+    // FIX D-05 (THE READABLE BAND): the sub renders at 44px — the feed's
+    // 40px body band was the grey-noise floor the audit measured
+    setFont(ctx, Math.max(TYPE_FLOOR, 44), 400);
+    const lines = wrapText(ctx, qa.sub, qw - 96, 44, 400);
     ctx.fillStyle = PALETTE.inkSoft;
-    lines.slice(0, Math.max(0, Math.floor((cardBot - 14 - subY) / 52))).forEach((ln, li) => ctx.fillText(ln, qx + 48, subY + li * 52));
+    // D-03: the sub's lines land ACROSS the hold (the build spread) —
+    // an 18-22s audit beat keeps adding reading lines instead of sitting.
+    // D-05: lines that do not fit the card close with an ellipsis — copy
+    // is cut by the LAYOUT, never clipped by the card's edge.
+    const fitLines = Math.max(0, Math.floor((cardBot - 14 - subY) / 52));
+    lines.slice(0, fitLines).forEach((ln, li) => {
+      const e2 = easeOutCubic(clamp01((t - holdBeat(g, li, Math.min(fitLines, lines.length), 0.5)) / 500));
+      if (e2 <= 0) return;
+      ctx.globalAlpha = e0 * e2;
+      const isLast = li === fitLines - 1 && lines.length > fitLines;
+      ctx.fillText(isLast ? ln.replace(/[^\S]+$/, '') + '…' : ln, qx + 48, subY + li * 52);
+    });
+    ctx.globalAlpha = 1;
     // U7/U1: the audit has an EXAMINER — the host leans on the question
-    // card's right edge (a hand on the question he is asking). Registered
-    // + declared for the guard.
-    registerRect('audit:qCardEdge', qx + qw - 4, H * 0.30 + 120, 22, 300);
-    financeHost(g, qx + qw + 40, H * 0.65, 1.6, {
-      seed: 13.7,
+    // card's near edge (a hand on the question he is asking). Registered
+    // + declared for the guard. Framing C keeps the examiner at the
+    // card's right edge; framings A/B follow their card edge.
+    const hostLeft = framing === 1;
+    const edgeX = hostLeft ? qx - 4 : qx + qw - 4;
+    registerRect('audit:qCardEdge', edgeX, H * 0.30 + 120, 22, 300);
+    financeHost(g, hostLeft ? qx - 130 : qx + qw + 40, H * 0.65, 1.6, {
+      seed: 13.7 + framing * 0.6,
       gesture: 'present',
-      glanceBias: -0.9,
-      contact: { x: qx + qw + 2, y: H * 0.30 + 170, hand: 'palm', easeAt: 0 },
+      glanceBias: hostLeft ? 0.9 : -0.9,
+      contact: { x: hostLeft ? qx + 2 : qx + qw + 2, y: H * 0.30 + 170, hand: 'palm', easeAt: 0 },
       declareId: 'audit:qCardEdge',
       label: 'audit-host',
       hostBody: true,
@@ -1848,7 +2082,8 @@ export function systemMapScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   const stage = Number(s.stage ?? 0);
   bg(g, { strength: 0.88 });
-  declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
+  // 100-JUDGE VISUAL AUDIT (defect D-06): declare the system's words.
+  declareOnScreenHeadline('Liquidity is a system, not a feature MANAGER + CONTRACT ENTERING EXITING REMAINING');
 
   setFont(ctx, 54, 600);
   ctx.fillStyle = PALETTE.ink;

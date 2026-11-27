@@ -80,9 +80,22 @@ export function bigTextScene(g: SceneCtx): void {
   // dedup registry existed but only hostScene declared into it. Statement
   // beats declare their on-screen lines; drawCaptions stands down for any
   // window whose words are already on screen in the serif.
-  declareOnScreenHeadline(lines.join(' '));
+  // 100-JUDGE VISUAL AUDIT (defect D-08 — THE MIDDLE REGISTER): when the
+  // beat ships ONE line, the statement's own next sentence (from the
+  // beat's narration) becomes the 62px support line — the beat's OWN
+  // words, no invention — so the desert frames (one sentence on an empty
+  // stage, ~5% occupied) gain a second editorial element and the film
+  // stops alternating deserts with walls.
+  const voSents = (g.beat.vo || '').match(/[^.!?]+[.!?]*/g)?.map((sx) => sx.trim()).filter(Boolean) ?? [];
+  const effLines: string[] = [...lines];
+  if (lines.length === 1 && voSents.length > 1) {
+    let sub2 = voSents[1];
+    if (sub2.length > 64) sub2 = sub2.slice(0, 63).replace(/[,;:\s]+\S*$/, '') + '…';
+    effLines.push(sub2);
+  }
+  declareOnScreenHeadline(effLines.join(' '));
   // P2 density payload (100-judge dossier, Prototype 8-2 — THE STATEMENT
-  // PAYOFF): the beat's dotPayoff prop draws the index field the statement
+  // PAYLOAD): the beat's dotPayoff prop draws the index field the statement
   // DESCRIBES — 500 whisper dots with the 7 gold members bracketed and
   // labelled — behind the type. Static furniture (pure function of W/H,
   // sits behind every content rect by construction, never guard-registered,
@@ -159,7 +172,7 @@ export function bigTextScene(g: SceneCtx): void {
     ? Math.sin((((t - 2200) % 2400) / 900) * Math.PI)
     : 0;
   const drawBlock = (dx: number, alphaMul: number): void => {
-    lines.forEach((ln, i) => {
+    effLines.forEach((ln, i) => {
       const ap = clamp01((t - 80) / 260);
       if (ap <= 0 || alphaMul <= 0) return;
       ctx.save();
@@ -233,7 +246,11 @@ export function bigTextScene(g: SceneCtx): void {
   // tile is a sanctioned 'pushed' prop in PROP_OWNERSHIP (may only touch
   // numerals, card edges or chart points; here it docks to the statement
   // block's lower edge).
-  const up2 = clamp01((t - 1500) / 700);
+  // D-08 companion (THE DESERT FIX — ARRIVALS MOVE UP): the underline
+  // wipes at 900ms (was 1500) and the % tile docks at 1300 (was 1900) —
+  // the statement frame's payload lands while the beat is still young,
+  // closing the "one sentence on an empty stage" window.
+  const up2 = clamp01((t - 900) / 700);
   if (up2 > 0) {
     ctx.save();
     ctx.globalAlpha = up2;
@@ -254,7 +271,7 @@ export function bigTextScene(g: SceneCtx): void {
     // statement block: line → tile → host hand, one contact chain on
     // content. The tile carries the beat's subject (the % the statement
     // is about) so the push READS as meaning, not decoration.
-    const tileE = clamp01((t - 1900) / 800);
+    const tileE = clamp01((t - 1300) / 800);
     if (tileE > 0) {
       const tileX = W / 2 - 280 + w;
       const dockJolt = tileE >= 1 ? Math.sin(clamp01((t - 2700) / 240) * Math.PI) * 3 : 0;
@@ -297,7 +314,9 @@ export function bigTextScene(g: SceneCtx): void {
   // alpha keys to BEAT time (a 12s-cap re-split group no longer replays his
   // entrance mid-count) and commits to the 0.85 floor / 180ms ramp — he
   // arrives after the slam at full presence instead of condensing.
-  const hp = g.beatT < 2200 ? 0 : 0.85 + 0.15 * clamp01((g.beatT - 2200) / 180);
+  // D-08 companion: the host arrives at 1700 (was 2200) — the frame's
+  // population beat closes the desert window earlier.
+  const hp = g.beatT < 1700 ? 0 : 0.85 + 0.15 * clamp01((g.beatT - 1700) / 180);
   // ── U3/D23 (STANDARD MARKET VISUAL REVIEW — THE REACTION CLOSE-UP): the
   // film's twist (c4-trade) and paradox-resolve (c5-both) are bigText
   // beats — inside the reaction window the count host TAKES the frame:
@@ -467,7 +486,14 @@ export function stampCardScene(g: SceneCtx): void {
   // U8: the stamp's dust burst — the slam has a floor
   dustBurst(ctx, cx, cy + 150, t, 500, 14, 220);
   // checkmark + sub — VAULT NOIR: the brass check (bright mass + accent)
-  const cp = clamp01((t - 700) / 700);
+  // 100-JUDGE VISUAL AUDIT (defect D-03 — STATIC HOLDS): the stamp beat's
+  // post-slam events spread across the HOLD — the check+sub arrive at
+  // ~14% of the scene group (capped 2.6s) and the data chip at ~30%
+  // (capped 5.2s), so a long stamp hold (the audit measured 4-11s of
+  // "only the caption moving" on the 5% ≠ YOUR EXIT stamp) keeps
+  // landing content instead of sitting after 1.8s.
+  const checkAt = Math.max(700, Math.min(g.d * 0.14, 2600));
+  const cp = clamp01((t - checkAt) / 700);
   if (cp > 0) {
     ctx.save();
     ctx.globalAlpha = cp;
@@ -501,10 +527,12 @@ export function stampCardScene(g: SceneCtx): void {
     // data chip — the neighboring journey chart's landing value, plated in
     // the film's own chip grammar, fading in after the sub settles. The
     // statement frame now carries the number behind its verdict: no
-    // typography-only window in the chapter.
+    // typography-only window in the chapter. (D-03: the chip's arrival
+    // rides the hold spread — see the check above.)
     const chip = s.dataChip as { big: string; label: string } | undefined;
     if (chip) {
-      const dp = clamp01((t - 1200) / 600);
+      const chipAt = Math.max(1200, Math.min(g.d * 0.3, 5200));
+      const dp = clamp01((t - chipAt) / 600);
       if (dp > 0) {
         ctx.save();
         ctx.globalAlpha = dp;

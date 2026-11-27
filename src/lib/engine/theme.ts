@@ -782,12 +782,46 @@ export function scenePlate(
       ctx.moveTo(wx, wy + wh / 2);
       ctx.lineTo(wx + ww, wy + wh / 2);
       ctx.stroke();
-      // the live tape under the pane — two glowing bars
-      ctx.fillStyle = rgba(tone === 'down' ? PALETTE.downVivid : PALETTE.upVivid, 0.55);
-      roundRect(ctx, wx + ww * 0.14, wy + wh * 0.24, ww * 0.5, 6, 3);
-      ctx.fill();
-      roundRect(ctx, wx + ww * 0.14, wy + wh * 0.40, ww * 0.68, 6, 3);
-      ctx.fill();
+      // ── 100-JUDGE VISUAL AUDIT (defect D-02 — THE GHOST CARD ROTATION):
+      // the pane's inner read used to be ONE stamped tape (two glowing
+      // bars) on every 'up'/'down' scene — the audit's "two floating ghost
+      // chart-cards appear in more than 15 of the 21 host beats". The pane
+      // now rotates through THREE reads keyed by the chapter architecture
+      // (a deterministic, chapter-stable key):
+      //   0 — the live tape bars      1 — a rising spark line
+      //   2 — three ledger rows
+      // Same room light source, three different windows.
+      const PANE_V: Record<string, number> = {
+        vault: 0, grid: 1, ledger: 2, pit: 0, cases: 1, ticker: 2, bull: 0, checklist: 1, ring: 2,
+      };
+      const paneV = PANE_V[String(opts.arch ?? 'vault')] ?? 0;
+      if (paneV === 0) {
+        // the live tape under the pane — two glowing bars
+        ctx.fillStyle = rgba(tone === 'down' ? PALETTE.downVivid : PALETTE.upVivid, 0.55);
+        roundRect(ctx, wx + ww * 0.14, wy + wh * 0.24, ww * 0.5, 6, 3);
+        ctx.fill();
+        roundRect(ctx, wx + ww * 0.14, wy + wh * 0.40, ww * 0.68, 6, 3);
+        ctx.fill();
+      } else if (paneV === 1) {
+        // the spark line — the window tracks a rising series
+        ctx.strokeStyle = rgba(tone === 'down' ? PALETTE.downVivid : PALETTE.upVivid, 0.62);
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(wx + ww * 0.14, wy + wh * 0.66);
+        ctx.lineTo(wx + ww * 0.36, wy + wh * 0.48);
+        ctx.lineTo(wx + ww * 0.52, wy + wh * 0.58);
+        ctx.lineTo(wx + ww * 0.86, wy + wh * 0.22);
+        ctx.stroke();
+      } else {
+        // the ledger rows — the window reads a statement
+        ctx.fillStyle = rgba('#9FC0E8', 0.38);
+        roundRect(ctx, wx + ww * 0.14, wy + wh * 0.24, ww * 0.62, 6, 3);
+        ctx.fill();
+        roundRect(ctx, wx + ww * 0.14, wy + wh * 0.42, ww * 0.44, 6, 3);
+        ctx.fill();
+        roundRect(ctx, wx + ww * 0.14, wy + wh * 0.60, ww * 0.56, 6, 3);
+        ctx.fill();
+      }
       ctx.restore();
       // THE CONSOLE EDGE — a steel hairline + leg tick, bottom-right
       const dy2 = H * 0.905;

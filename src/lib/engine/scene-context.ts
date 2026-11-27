@@ -57,6 +57,13 @@ export interface SceneCtx {
    *  material alternates with the chapter rhythm without per-beat script
    *  changes. */
   chapterIdx: number;
+  /** 100-JUDGE VISUAL AUDIT (defect D-07 — ONE FRAMING HELD FOR LONG RUNS):
+   *  this beat's index WITHIN its sceneKey run (0 = the run's first beat).
+   *  The long-run scenes (caseFiles, auditChecklist, wrapperMatrix) use it
+   *  as the deterministic key of a framing rotation — the same scene
+   *  re-blocks itself every few beats instead of holding one layout for
+   *  9-15 consecutive beats. Computed by the director; scrub-safe. */
+  runIdx: number;
 }
 
 export type SceneDrawer = (g: SceneCtx) => void;
