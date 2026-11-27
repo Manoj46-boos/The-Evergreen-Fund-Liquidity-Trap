@@ -194,6 +194,29 @@ export function expressionPose(expression?: string): Partial<typeof POSES.idle> 
   }
 }
 
+// 100-JUDGE AUDIT (defect D-16 — ONE FACE FOR TWENTY-SIX MINUTES): the
+// rig ships five expressive poses (shock / wry / warm / aha / facepalm)
+// but the sentence gesture lists (talkA / pointR / present / count2 /
+// talkB / count1) never reached them — the voStyle-to-expression map
+// ended at the FACE, so the body played one polite presenter register for
+// the whole film. `expressionBodyOf` blends each vocal register's POSE
+// into the gesture the scene asked for: the head, spine and lean terms
+// (never the near-arm angles a contact verb will IK-solve over) plus the
+// hand-glyph upgrades (reveal/quote hands OPEN — the contact override
+// still wins wherever a scene plants the hand). The audit's five poses
+// are now reachable from every beat, keyed to how the line is SPOKEN.
+const EXPRESSION_BODY: Record<string, Partial<typeof POSES.idle>> = {
+  urgent: { lean: -4, headTilt: -4, rootY: 3, shoulderDrop: 5, browRaise: 0.72, smile: 0.05, eyeL: 1.32, eyeR: 1.32 },
+  reveal: { lean: -2, headTilt: -2, browRaise: 0.85, smile: 0.5 },
+  quote: { lean: -3, headTilt: -3, pelvisTilt: -3, browRaise: 0.42, smile: 0.85, eyeL: 1.12, eyeR: 1.12 },
+  calm: { lean: 3, headTilt: 3, browRaise: 0.3, browAngle: -6, smile: 0.4 },
+  serious: { lean: 2, headTilt: 2, browAngle: 14, smile: 0 },
+};
+
+export function expressionBodyOf(expression?: string): Partial<typeof POSES.idle> {
+  return expression ? EXPRESSION_BODY[expression] ?? {} : {};
+}
+
 /** Common host stage: background, spotlight, optional stage decoration. */
 function hostStage(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
   const { ctx, W, H } = g;
@@ -399,13 +422,13 @@ function drawHost(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
       pointBias: bias,
       glanceBias: side === 'left' ? 0.9 : side === 'right' ? -0.9 : 0,
     });
-    const expr = expressionPose(beatExpressionOf(g.beat));
+    const expr = { ...expressionPose(beatExpressionOf(g.beat)), ...expressionBodyOf(beatExpressionOf(g.beat)) };
     pose = { ...pose, ...expr };
   }
   // U4: the walk branch blends too — the expression rides every pose,
   // entrance included (an urgent beat ENTERS urgent).
   if (entrance === 'walk') {
-    const expr = expressionPose(beatExpressionOf(g.beat));
+    const expr = { ...expressionPose(beatExpressionOf(g.beat)), ...expressionBodyOf(beatExpressionOf(g.beat)) };
     pose = { ...pose, ...expr };
   }
   const nodP = g.speaking ? nodPulse(g.beatT, g.wordTimes) : 0;
@@ -1418,45 +1441,39 @@ export function splitNumbersScene(g: SceneCtx): void {
   // the market panel owns its own list in every vs mode.
   if (mode === 'vs' || mode === 'vs-punch') {
     // PHASE-5 (the vs frames are the ones the feed board named "host cropped
-    // or absent"): both panels step to 0.36W so the MOOD panel frees a
-    // presenter column at the right edge — the host stands BESIDE the mood
-    // panel, palm ON its right edge (the contact verb the scene never had).
+    // or absent"): both panels step so the MOOD panel frees a presenter
+    // column at the right edge — the host stands BESIDE the mood panel,
+    // palm ON its right edge (the contact verb the scene never had).
     // v4's mirror-break rides on: the market panel keeps its 44px lift.
-    const vsW = W * 0.36;
+    // 100-JUDGE AUDIT (defect D-09 — THE HOST ON THE PANEL, b085): the
+    // shipped staging put the host's drawn torso 120px INSIDE the mood
+    // panel's rectangle — his body plated "UNDERSTATED" and the labels
+    // ran under his chin. The panel narrows to 0.32W, the labels wrap
+    // 140px short of its right edge, and the host steps to 0.915W so his
+    // drawn core clears the panel by 12px with the palm landing ON the
+    // panel's right edge at mid-height (shoulder-height reach, no root
+    // pull). Figure and data each own their column.
+    const vsW = W * 0.32;
+    const vsPanelR = W * 0.545 + vsW;
     const delay = 300;
     drawNumberPanel(g, W * 0.06, py - 22, vsW, panelH, String(s.leftKicker ?? 'THE MARKET'), leftStats, t, 0);
-    // U-16 + D-05/D-08 (THE LABEL PLATE FIX): the host stands at 0.885W —
-    // the MOOD labels now wrap 200px short of the panel's right edge so
-    // no label line terminates inside the figure's head zone.
-    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay, vsW - 200);
+    // U-16 + D-05/D-08 (THE LABEL PLATE FIX): the mood labels wrap before
+    // the figure's head zone.
+    drawNumberPanel(g, W * 0.545, py + 22, vsW, panelH, String(s.rightKicker ?? 'THE MOOD'), moodStats, t, delay, vsW - 140);
     // PHASE 3 COMPOSITION (Fix 1 — DATA-BEAT HERO FLOOR): the vs beat's
-    // hero object is the two-panel data system — x 0.06W→0.905W × panelH:
-    // 1622×~370 = 28.7% of the frame, over the 18% floor (the harness
-    // asserts it).
+    // hero object is the two-panel data system — the harness asserts the
+    // 18% floor.
     registerHeroObject(g.beat.scene.sceneKey ?? g.beat.scene.type, 'vs-panel-system',
       W * 0.845, panelH, W, H);
     // the host — beside the mood panel he narrates, palm ON its right edge.
-    // 100-JUDGE VISUAL AUDIT (Fix 3 — HOST-SCALE HIERARCHY): 0.94W/0.95 rig
-    // was the film's second-smallest host — a cropped speck at the frame
-    // edge. 0.87W at 1.5 rig: the premium area band, the palm solve onto
-    // the panel edge holds (reach at 1.5 covers the gap), and the raised
-    // arm's envelope stays clear of the frame edge. Guard sweep re-arbitrates.
-    // PHASE 3 COMPOSITION (Fix 1 — DATA-BEAT HERO FLOOR): the splitNumbers
-    // vs beat's hero is the TWO-PANEL DATA SYSTEM (registered below at
-    // 32%) — the host is its presenter at the certified 1.5 side band.
-    // D-05/D-08 companion (THE LABEL PLATE FIX): the host steps to 0.885W
-    // and his ground drops to 0.64H — his head zone clears the mood
-    // labels' second line, which (with the wrap width below) now wraps
-    // BEFORE his column instead of running under his chin (the audit's
-    // b084 frame shipped the labels plated INTO the figure).
-    drawStickmanV2(ctx, W * 0.885, H * 0.64, 1.5, t, {
+    drawStickmanV2(ctx, Math.min(W * 0.915, vsPanelR + 96), H * 0.64, 1.5, t, {
       pose: Stickman.poseAt(t, { gesture: 'present', speaking: g.speaking, sentenceId: g.sentenceId, sentenceT: g.sentenceT,
       sentenceDurMs: g.sentenceDurMs, wordTimes: g.gWordTimes }),
       alpha: clamp01((t - 500) / 500),
       look: -0.8,
       talk: g.speaking ? talkAt(g.beatT, g.wordTimes) : 0,
       parallax: true,
-      contact: { x: W * 0.545 + vsW + 22, y: py + 100, hand: 'palm' },
+      contact: { x: vsPanelR + 6, y: py + 22 + panelH / 2, hand: 'palm' },
     }, 27);
   } else if (mode === 'left' || mode === 'right') {
     // single-panel modes: the host owns the empty half — presenting at the

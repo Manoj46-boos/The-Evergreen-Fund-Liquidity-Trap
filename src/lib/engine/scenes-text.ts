@@ -171,85 +171,104 @@ export function bigTextScene(g: SceneCtx): void {
   const rePulse = t > 2200 && ((t - 2200) % 2400) < 900
     ? Math.sin((((t - 2200) % 2400) / 900) * Math.PI)
     : 0;
+  // ── 100-JUDGE AUDIT (defects D-13 + D-09) — THE STATEMENT COLUMN ──────────
+  // D-13 (b101 "An efficient implementation tool"): the centered 118px
+  // block auto-fit BOTTOMED OUT at 72px and STILL overflowed its 1660px
+  // box — the headline ran past BOTH frame edges (a render-crash read).
+  // D-09 (b121 "The most important sentence"): the same centered block
+  // crossed the count host's head band — the film's loudest plate landed
+  // ACROSS the character's face at the payoff beat.
+  // The fix is the film's own editorial grammar (the hostSceneV2 column):
+  // the statement owns a LEFT column (x 130..1160) whose right edge keeps
+  // an 86px channel to the host's head band, the type FITS by measurement
+  // (proportional fit, 64px floor, wrap when the fit dies — a headline can
+  // never overflow its box again), the gold support line + underline +
+  // % tile complete the column, and the count host keeps his certified
+  // staging, palm ON the underline's dock. Statement and character each
+  // own their plane; the plate never lands on the face.
+  const COL_X = 130;
+  const COL_R = 1160;
+  const COL_W = COL_R - COL_X;
+  const HOST_DOCK = 1240; // the underline's end — the host's palm target
+  // the statement's fit — measured, proportional, wrap-below-floor
+  const stmt = lines[0] ?? '';
+  setFont(ctx, 118, 700, FONT_DISPLAY);
+  const stmtM = ctx.measureText(stmt).width;
+  const stmtSize = Math.max(64, Math.min(118, (118 * COL_W) / Math.max(1, stmtM)));
+  let stmtRows: string[] = [stmt];
+  if (stmtSize < 64 || stmtM > COL_W) {
+    setFont(ctx, stmtSize, 700, FONT_DISPLAY);
+    const words = stmt.split(' ');
+    stmtRows = [];
+    let cur = '';
+    for (const w of words) {
+      const test = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(test).width > COL_W && cur) { stmtRows.push(cur); cur = w; }
+      else cur = test;
+    }
+    if (cur) stmtRows.push(cur);
+  }
+  // the gold support line (line 2 / the D-08 sentence) fits the same column
+  const gold = effLines[1] ?? '';
+  setFont(ctx, 62, 600, FONT_DISPLAY);
+  const goldM = ctx.measureText(gold).width;
+  const goldSize = Math.max(40, Math.min(62, (62 * COL_W) / Math.max(1, goldM)));
+  const stmtLead = stmtSize * 1.14;
+  const stmtY0 = H * 0.26 + stmtSize * 0.42; // the first row's baseline
+  const stmtBot = stmtY0 + (stmtRows.length - 1) * stmtLead;
+  const goldY = stmtBot + 86;
   const drawBlock = (dx: number, alphaMul: number): void => {
-    effLines.forEach((ln, i) => {
-      const ap = clamp01((t - 80) / 260);
-      if (ap <= 0 || alphaMul <= 0) return;
-      ctx.save();
-      ctx.globalAlpha = ap * alphaMul;
-      ctx.textAlign = 'center';
-      // P3 hero register: the slam travels 0.90 → 1.0 with a 10% overshoot
-      // (double the ambient arrival) — the words LAND.
-      const scale = (0.9 + HERO.blockTravel * easeOutBack(ap)) * (1 + 0.028 * rePulse);
-      // v10 (panel TYPE-2): EDITORIAL SIZE HIERARCHY — line 1 is the statement
-      // in inkDeep (the display ink, 11.9:1), line 2 the punchline in goldDeep.
-      // v10.1 (panel 11 re-review): the v10 step (108 → 88, a 19% ratio) still
-      // read as "two lines near-equal in scale" — a couplet, not a headline.
-      // The hierarchy is now unambiguous: line 1 at 118px (auto-fit to 1660),
-      // line 2 at 62px/600 — a 1.9× editorial ratio, statement + kicker.
-      const size = i === 0 ? 118 : 62;
-      // PHASE-0 round 3 (bigText's residual 27% band measured at y 0-48 of
-      // 180 — the zone ABOVE line 1's cap): line 1's baseline moves to
-      // 0.30H (cap top ~0.21H); line 2 to 0.49H; underline 0.62H; host
-      // 0.672H. Top gap ~0.21H < 20% bar. A statement beat starts high and
-      // heavy — the top-heavy stack is also the correct editorial read.
-      ctx.translate(W / 2, H * 0.30 + i * 190);
-      ctx.scale(scale, scale);
-      if (i === 0) {
-        setFont(ctx, size, 700, FONT_DISPLAY);
-        let s2 = size;
-        while (ctx.measureText(ln).width > 1660 && s2 > 72) {
-          s2 -= 2;
-          setFont(ctx, s2, 700, FONT_DISPLAY);
-        }
-      } else {
-        setFont(ctx, size, 600, FONT_DISPLAY);
-      }
-      // AUDIT-ROUND-3 (Fix 4 — STATEMENT MATERIALITY): the bigText frames
-      // scored VFX 3/10 on the external audit ("literally nothing
-      // happening... reads as a slide"). The type now SITS in the room: a
-      // soft one-light drop shadow under the block. The cheapest material
-      // cue in 2D typography: the words gain height without gaining noise.
-      // PHASE-0 (panel report §7-D4): the offset unifies to the ONE-LIGHT
-      // rule (−4, 0) — the exact vector groundShadowV2, card()'s passes and
-      // the caption pill all obey (the (−2, +4) hand-roll was a fourth
-      // dialect of the same light).
+    const ap = clamp01((t - 80) / 260);
+    if (ap <= 0 || alphaMul <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = ap * alphaMul;
+    ctx.textAlign = 'left';
+    // P3 hero register: the slam travels 0.90 → 1.0 with a 10% overshoot
+    const scale = (0.9 + HERO.blockTravel * easeOutBack(ap)) * (1 + 0.028 * rePulse);
+    ctx.translate(COL_X + COL_W / 2, stmtY0);
+    ctx.scale(scale, scale);
+    ctx.translate(-(COL_X + COL_W / 2), -stmtY0);
+    // AUDIT-ROUND-3 (Fix 4 — STATEMENT MATERIALITY): the one-light drop
+    // shadow (−4, 0), then the ink row. The pen stays in FRAME space
+    // (the scale wraps about the column's center and returns), so every
+    // row draws at its own column position.
+    stmtRows.forEach((ln, ri) => {
+      setFont(ctx, stmtSize, 700, FONT_DISPLAY);
       ctx.fillStyle = rgba(PALETTE.shadow, 0.18);
-      ctx.fillText(ln, dx - 4, 0);
-      ctx.fillStyle = i === 1 ? PALETTE.goldDeep : PALETTE.inkDeep;
-      ctx.fillText(ln, dx, 0);
-      ctx.restore();
+      ctx.fillText(ln, COL_X + dx - 4, stmtY0 + ri * stmtLead);
+      ctx.fillStyle = PALETTE.inkDeep;
+      ctx.fillText(ln, COL_X + dx, stmtY0 + ri * stmtLead);
     });
+    if (gold) {
+      setFont(ctx, goldSize, 600, FONT_DISPLAY);
+      ctx.fillStyle = rgba(PALETTE.shadow, 0.18);
+      ctx.fillText(gold, COL_X + dx - 4, goldY);
+      ctx.fillStyle = PALETTE.goldDeep;
+      ctx.fillText(gold, COL_X + dx, goldY);
+    }
+    ctx.restore();
   };
   const SMEAR = t >= 340 && t < 380; // the frame the block lands (ap completes at 340)
   drawBlock(SMEAR ? W * 0.015 : 0, SMEAR ? 0.35 : 0); // the motion-blur ghost, UNDER
   drawBlock(0, 1); // the solid block
+  declareOnScreenHeadline(stmtRows.join(' ') + ' ' + gold);
   // AUDIT-2 / §10.4: the impact triple's visible members — ring + glow
-  // (the micro-shake was applied at the top of the scene).
-  // PHASE-0 (Fix 2): ring + glow pivot to the new statement center (0.40H).
-  impactRing(ctx, W / 2, H * 0.36, t, 340, 210, HERO.ringScale);
+  // (the micro-shake was applied at the top of the scene). The column
+  // carries them: the events pivot on the statement's own center.
+  impactRing(ctx, COL_X + COL_W / 2, stmtY0 - stmtSize * 0.2, t, 340, 210, HERO.ringScale);
   // U8: the slam kicks up its floor dust (first time on statement frames)
-  dustBurst(ctx, W / 2, H * 0.60, t, 340, 14, 200);
+  dustBurst(ctx, COL_X + COL_W / 2, H * 0.60, t, 340, 14, 200);
   if (t >= 340 && t < 340 + 66) {
     // the double-radius glow frame — one beat of the number's own light
-    glowBlob(ctx, W / 2, H * 0.32, 640, '#9FC0E8', 0.20);
+    glowBlob(ctx, COL_X + COL_W / 2, H * 0.32, 640, '#9FC0E8', 0.20);
   }
-  // supportive underline
-  // PHASE-0 round 2: the underline sits at 0.62H between line 2 (0.50H)
-  // and the host (0.672H) — the three-element stack leaves no 20% gap.
-  // 100-JUDGE VISUAL AUDIT (U-02 — KILL THE EMPTY-LINE PUSH, B-01): the bare
-  // gold underline that terminated in open space was the film's default
-  // stage business — "furniture given choreography". The rule is now the
-  // RAIL a pushed object travels: a brass % TILE slides along it and stops
-  // against the statement block's edge (content), where the host's palm
-  // brackets it. Every contact verb resolves to a content element — the
-  // tile is a sanctioned 'pushed' prop in PROP_OWNERSHIP (may only touch
-  // numerals, card edges or chart points; here it docks to the statement
-  // block's lower edge).
+  // supportive underline — the rail a pushed object travels. The rail now
+  // spans the COLUMN (colX → HOST_DOCK): the % tile docks at the rail's
+  // end under the statement block, where the host's palm brackets it —
+  // the contact chain survives the new layout unchanged.
   // D-08 companion (THE DESERT FIX — ARRIVALS MOVE UP): the underline
-  // wipes at 900ms (was 1500) and the % tile docks at 1300 (was 1900) —
-  // the statement frame's payload lands while the beat is still young,
-  // closing the "one sentence on an empty stage" window.
+  // wipes at 900ms and the % tile docks at 1300 — the statement frame's
+  // payload lands while the beat is still young.
   const up2 = clamp01((t - 900) / 700);
   if (up2 > 0) {
     ctx.save();
@@ -258,22 +277,18 @@ export function bigTextScene(g: SceneCtx): void {
     ctx.lineWidth = 9;
     ctx.lineCap = 'round';
     // AUDIT-ROUND-3 (Fix 4): the underline WIPES left→right (a drawn
-    // gesture under the words) instead of expanding from the center
-    // (a loading bar). Reading direction = wipe direction.
-    const w = 560 * easeOutCubic(up2);
+    // gesture under the words) instead of expanding from the center.
+    const w = (HOST_DOCK - COL_X) * easeOutCubic(up2);
     const railY = H * 0.585;
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 280, railY);
-    ctx.lineTo(W / 2 - 280 + w, railY);
+    ctx.moveTo(COL_X, railY);
+    ctx.lineTo(COL_X + w, railY);
     ctx.stroke();
-    // the PUSHED OBJECT — the % tile rides the rail's wipe edge (the
-    // gesture has a payload now), then docks at the rail's end under the
-    // statement block: line → tile → host hand, one contact chain on
-    // content. The tile carries the beat's subject (the % the statement
-    // is about) so the push READS as meaning, not decoration.
+    // the PUSHED OBJECT — the % tile rides the rail's wipe edge, then
+    // docks at the rail's end: line → tile → host hand, one contact chain.
     const tileE = clamp01((t - 1300) / 800);
     if (tileE > 0) {
-      const tileX = W / 2 - 280 + w;
+      const tileX = COL_X + w;
       const dockJolt = tileE >= 1 ? Math.sin(clamp01((t - 2700) / 240) * Math.PI) * 3 : 0;
       ctx.save();
       ctx.translate(tileX, railY + 26 + dockJolt);
@@ -1185,9 +1200,34 @@ export function commentPromptScene(g: SceneCtx): void {
   ctx.save();
   ctx.globalAlpha = ap;
   ctx.textAlign = 'center';
-  setFont(ctx, 84, 700);
-  ctx.fillStyle = PALETTE.ink;
-  ctx.fillText(q, W / 2, H * 0.32);
+  // 100-JUDGE AUDIT (defect D-13 — THE CLIPPED QUESTION, b124): the
+  // question drew at a FIXED 84px with no fit check — "Which question
+  // would you put FIRST to the manager?" measured ~2100px and lost its W
+  // and its tail off BOTH frame edges (a render-crash read on the film's
+  // engagement beat). The question now FITS: measured, proportional
+  // shrink toward the 52px readable floor, and a two-row wrap when the
+  // fit dies — a headline can never overflow its box again.
+  {
+    const qMax = W - 360;
+    setFont(ctx, 84, 700);
+    const qm = ctx.measureText(q).width;
+    const qSize = Math.max(52, Math.min(84, (84 * qMax) / Math.max(1, qm)));
+    let qRows: string[] = [q];
+    if (qm > qMax) {
+      setFont(ctx, qSize, 700);
+      qRows = [];
+      let cur = '';
+      for (const w of q.split(' ')) {
+        const test = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(test).width > qMax && cur) { qRows.push(cur); cur = w; }
+        else cur = test;
+      }
+      if (cur) qRows.push(cur);
+    }
+    setFont(ctx, qSize, 700);
+    ctx.fillStyle = PALETTE.ink;
+    qRows.forEach((ln, i) => ctx.fillText(ln, W / 2, H * 0.32 + i * (qSize * 1.18)));
+  }
   setFont(ctx, 34, 600);
   ctx.fillStyle = PALETTE.inkSoft;
   const sub = s.sub as string;

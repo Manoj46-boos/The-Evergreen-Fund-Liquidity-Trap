@@ -84,7 +84,7 @@ const BODY_MASS = '#7A5D10';
 // tailored suit (tee = the suit body, vest = the suit front) with a
 // steel-blue silk scarf and brass trims. Deliberately NOT the previous
 // film's gold-vest identity.
-const OUTFIT = { tee: '#24304E', vest: '#2E4068', trouser: '#1B2542' } as const;
+const OUTFIT = { tee: '#2B3A5F', vest: '#3A5084', trouser: '#243058' } as const;
 
 /**
  * 100-JUDGE VISUAL AUDIT (U-04 — ONE COSTUME LAW): the packaging costume —
@@ -824,6 +824,18 @@ export function handGlyph(
   // screen space (the smallest hand a cold viewer names as a hand on a
   // 1080p frame) and the point glyph's fingertip floor rises to 14px.
   s = Math.max(s, 20 / Math.max(0.5, rigScale));
+  // 100-JUDGE AUDIT (defect D-15 — THE COUNT VOCABULARY INVISIBLE BELOW
+  // RIG 2.0): the count glyph's palm and fingers were sized in local units,
+  // so at the working rigs (1.4-1.7) the three extended fingers were ~5px
+  // wide with 2.4px tips — the count1/2/3 hand read as the same white
+  // circle as the mitten at the 320px gate. A hand that COUNTS carries a
+  // screen-space floor of its own (24px palm) and the fingers get the
+  // same screen floors the point glyph already ships (9px base / 5px tip
+  // at 1080p = 1.5px / 0.8px at the twin) — the counting hand reads as
+  // ONE, TWO, THREE at every rig the film stages.
+  if (mode === 'count1' || mode === 'count2' || mode === 'count3') {
+    s = Math.max(s, 24 / Math.max(0.5, rigScale));
+  }
   // P1-2 (100-judge audit, Table 3 — HANDS): the FIST + COUNT glyphs.
   // "Featureless mitts in every pose" / "a withered claw" — and the
   // count poses had nothing to count WITH. The fist: a rounded mass + a
@@ -911,7 +923,8 @@ export function handGlyph(
       const bx = x + Math.sin(a) * s * 0.14, by = y + Math.cos(a) * s * 0.14;
       const ex = x + Math.sin(fa) * s * 1.04, ey = y + Math.cos(fa) * s * 1.04;
       const px2 = Math.sin(fa + Math.PI / 2), py2 = Math.cos(fa + Math.PI / 2);
-      const w0 = s * 0.34, w1 = s * 0.15, dx = Math.sin(fa), dy = Math.cos(fa);
+      // D-15: screen-space finger floors — the count fan survives the feed
+      const w0 = Math.max(s * 0.34, 9), w1 = Math.max(s * 0.15, 5), dx = Math.sin(fa), dy = Math.cos(fa);
       ctx.moveTo(bx - px2 * w0 / 2, by - py2 * w0 / 2);
       ctx.lineTo(ex - px2 * w1 / 2, ey - py2 * w1 / 2);
       ctx.quadraticCurveTo(ex + dx * w1 * 0.7, ey + dy * w1 * 0.7, ex + px2 * w1 / 2, ey + py2 * w1 / 2);
@@ -1752,10 +1765,20 @@ export function drawStickmanV2(
       'host'
     );
   } else {
-    registerRect(
-      `stickman@${Math.round(cx)},${Math.round(groundY)}`,
-      cx - 122 * scale, groundY - 12 * scale, 244 * scale, 48 * scale
-    );
+    // D-10 (the walk-aware slab): the ±122 standing slab registered a
+    // MID-STRIDE walker too — at every walk-in entrance the slab crossed
+    // the frame edge 60-100px deep (the entrance IS an edge crossing; the
+    // hostBody bands already gate this). The walking figure registers its
+    // true stride band (±80, the same register the hostBody branch uses),
+    // and — the hostBody doctrine — only while the core is inside the
+    // frame: a walk-in entrance legitimately crosses the edge.
+    const slabHalf = r.walkPhase !== undefined ? 80 : 122;
+    if (r.walkPhase === undefined || cx > slabHalf * scale + 2) {
+      registerRect(
+        `stickman@${Math.round(cx)},${Math.round(groundY)}`,
+        cx - slabHalf * scale, groundY - 12 * scale, slabHalf * 2 * scale, 48 * scale
+      );
+    }
   }
   // AUDIT-ROUND-2 (fix 19 — the split draw): 'far' renders shadow + far
   // limbs only; 'rest' renders from the near leg onward; 'all' (default)
@@ -1951,8 +1974,8 @@ export function drawStickmanV2(
   // variants (prof / worker) keep their own wardrobes — the trouser is
   // the HOST's garment. The cream "white tights under a navy jacket"
   // read is dead at every rig.
-  const trouser = prof || worker ? ink : OUTFIT.trouser;
-  const trouserFar = prof || worker ? farInk : hexLerp(OUTFIT.trouser, '#050912', 0.24);
+  const trouser = prof ? ink : OUTFIT.trouser;
+  const trouserFar = prof ? farInk : hexLerp(OUTFIT.trouser, '#050912', 0.24);
   if (drawFar) {
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1999,7 +2022,7 @@ export function drawStickmanV2(
     // the shoe pitch multiplies by max(1, rig/1.5) so the heel-strike →
     // toe-off roll READS at feed scale (foot plants, not slides) at every
     // rig the film stages.
-    shoeWedge(farFoot, prof || worker ? farInk : '#111B31', (pose.lToe ?? 0) * Math.max(1, scale / 1.5));
+    shoeWedge(farFoot, prof ? farInk : '#111B31', (pose.lToe ?? 0) * Math.max(1, scale / 1.5));
     ctx.restore();
   }
   if (!drawRest) { ctx.restore(); ctx.restore(); return; }
@@ -2014,8 +2037,8 @@ export function drawStickmanV2(
   // a porcelain toe-cap glint, so the foot ANCHORS the trouser leg (the
   // cream wedge read "barely anchored the ankles" — defect D8's second
   // half). The cast variants keep their own shoe ink.
-  shoeWedge(nearFoot, prof || worker ? ink : '#16223E', (pose.rToe ?? 0) * Math.max(1, scale / 1.5));
-  if (!prof && !worker) {
+  shoeWedge(nearFoot, prof ? ink : '#16223E', (pose.rToe ?? 0) * Math.max(1, scale / 1.5));
+  if (!prof) {
     // the toe-cap glint — one hairline the light owns (one-light rule)
     ctx.save();
     ctx.strokeStyle = rgba(PALETTE.ink, 0.65);
@@ -2122,8 +2145,16 @@ export function drawStickmanV2(
     // 1.2 → 1.7: the flick exists at the hero/presenting registers where
     // its 3.2px tip survives; below, the knot + collar break carry the
     // brand (the knot draws at all scales — see the gold knot block).
+    // 100-JUDGE AUDIT (defect D-18 — NO FEED-READABLE SIGNATURE SILHOUETTE):
+    // at 320px the steel scarf (#31436B on the #13254B room) compressed into
+    // "dark torso on light head" — the two-tone outfit the design system
+    // describes was not distinguishable at the gate. The scarf joins the
+    // film's BRASS register (the pocket square and lapel gold it was designed
+    // to answer): the collar now carries a mid-tone accent that survives the
+    // feed downsample, and the silhouette names itself — ivory head, brass
+    // collar, tailored navy body — in three seconds at phone scale.
     if (scale >= 1.7) {
-      scarfTail(ctx, neckX - 3, neckY + 12, wave0 * 0.5, '#31436B', PALETTE.gold,
+      scarfTail(ctx, neckX - 3, neckY + 12, wave0 * 0.5, PALETTE.gold, PALETTE.goldDeep,
         t, seed, r.walkPhase !== undefined ? 3.2 : 1, 1 + talkEnv0 * 1.4);
     }
     // (no sub-gate stroke: knot-only below 1.7, per the audit)
@@ -3152,7 +3183,13 @@ export function drawStickmanV2(
     ctx.beginPath();
     ctx.ellipse(0, -1, 35, 42, 0, 0, Math.PI * 2);
     ctx.clip();
-    ctx.fillStyle = ink;
+    // 100-JUDGE AUDIT (defect D-19 — THE WHITE BONNET): the cap's crown
+    // filled with the film's porcelain ink (#EAF2FF) — on the ivory head
+    // it read as a white swim-cap, not a garment (the cap was designed when
+    // the cast wore solid-ink becker heads; the ivory flip turned its fill
+    // white). The cap now fills with the wardrobe's dark navy — a flat cap
+    // ON the ivory egg, silhouette-different from the host's bare crest.
+    ctx.fillStyle = '#16223E';
     ctx.beginPath();
     ctx.ellipse(0, -27, 35, 24, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -3164,9 +3201,9 @@ export function drawStickmanV2(
     ctx.ellipse(0, -27, 35, 24, 0, Math.PI * 0.10, Math.PI * 0.90);
     ctx.stroke();
     ctx.restore();
-    // the brim — a flat bar jutting toward the look direction
+    // the brim — a flat bar jutting toward the look direction (same navy)
     const brimDir = (r.look ?? 0) >= 0 ? 1 : -1;
-    ctx.fillStyle = ink;
+    ctx.fillStyle = '#16223E';
     ctx.save();
     ctx.translate(brimDir * 6, -23);
     ctx.rotate(brimDir * -0.08);

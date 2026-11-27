@@ -28,7 +28,7 @@ import { SceneCtx, declareOnScreenHeadline } from './scene-context';
 import { wrapText, sourceTag } from './charts';
 import { Stickman, POSES, blendPose, walkIn } from './stickman';
 import { drawStickmanV2, talkAt } from './stickman-v2';
-import { walkStrike, expressionPose } from './scenes-host';
+import { walkStrike, expressionPose, expressionBodyOf } from './scenes-host';
 import { registerRect, registerText, declareHostContact } from './collision';
 import { registerFigure } from './scale-law';
 import { registerHeroObject } from './composition';
@@ -84,7 +84,8 @@ function financeHost(
     glanceBias: opts.glanceBias ?? 0,
   });
   // U4: the voStyle face — every data-scene beat inherits an expression.
-  pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)) };
+  // D-16: the face AND the body register ride every data-scene host.
+  pose = { ...pose, ...expressionPose(beatExpressionOf(g.beat)), ...expressionBodyOf(beatExpressionOf(g.beat)) };
   let x = hx;
   let walkPhase: number | undefined;
   if (opts.walkDur) {
@@ -93,7 +94,7 @@ function financeHost(
     // the cold open's beat IS the group's first beat, so beat clock and
     // group clock agree there), then crosses on the walkIn clock.
     const wt = t - (opts.walkAt ?? 0);
-    if (hx - from >= 120 && wt > 0) {
+    if (hx - from >= 90 && wt > 0) {  // D-10: tight stages walk 90px+ (the band's edge gate is the walkFrom value)
       const r = walkIn(wt, from, hx, opts.walkDur, pose, scale, 5.2);
       if (r) {
         x = r.x;
@@ -202,9 +203,15 @@ export function statRevealScene(g: SceneCtx): void {
   const coldOpen = opening && mode === 'setup';
   const growP = opening && !coldOpen ? clamp01((bt - 200) / 2300) : 1;
   const turnP = opening ? clamp01((bt - 6070) / 900) : 0;
-  const gx = W * (mode === 'prorate' || mode === 'limit' ? 0.265 : 0.30);
+  // D-10 stage geometry: ONE glyph position for every mode (the mode
+  // split put the limit/prorate glyph 67px further left, which is exactly
+  // where the host's certified slab collides with the frame edge under
+  // the worst-case camera). S drops to 175 — the brand object keeps its
+  // presence while the whole glyph+host stage fits inside the camera
+  // envelope with the head band clear of the top bowl (verified below).
+  const gx = W * 0.30;
   const gy = H * 0.44;
-  const S = 200;
+  const S = 175;
 
   bg(g, { furniture: false, strength: 0.86 });
   declareOnScreenHeadline(String(g.s.headline ?? g.beat.scene.sceneKey ?? 'finance scene'));
@@ -431,17 +438,32 @@ export function statRevealScene(g: SceneCtx): void {
     // the host plants on the LEFT stage block (clear of the stat column at
     // rx=883 — the 806 staging plated the $1M slot); the cold open's
     // walk-through CROSSES the left third to reach it, mid-stride at 4s.
-    const hxR = gx - 150;
+    // 100-JUDGE AUDIT (defect D-10 — THE BRASS % OCCLUDES THE HEAD): the
+    // shipped staging planted the host 150px from the glyph's center — his
+    // head band sat INSIDE the top bowl's annulus and he "peeked around his
+    // own brand object" (b001-b003, b114-b115). The fist-on-the-slash verb
+    // was the root cause: the contact solver always pulls the root toward
+    // any target beyond arm reach, dragging the body back INTO the glyph's
+    // bounding box. The premium staging separates the two stage partners
+    // completely: the host plants OUTSIDE the glyph's bounding box (his
+    // head band clears the top bowl by 15px), presents it with the open
+    // gesture and the committed gaze — and the glyph's own pulled slice
+    // (the 5% wedge) rests at the glyph's base as the bridge object he
+    // gestures AT. No overlap, no pull, both silhouettes fully readable.
+    const hxR = gx - 240;  // head band [gx-308, gx-172] clears the top bowl [gx-161, gx-22] by 10px
     const hyR = H * 0.675;
     const wedgeT0 = coldOpen ? 1700 : 2400;
     const wedgeLand = coldOpen ? 2700 : 3300;
     const wedgeP = mode === 'prorate' || coldOpen ? clamp01((bt - wedgeT0) / (wedgeLand - wedgeT0)) : 0;
-    // the wedge's rest position — BESIDE the glyph (the pulled 5% slice the
-    // thumbnail promises). At bt < wedgeT0 the cold open SHOWS it resting
-    // there (the first-frame contract, U-23); the shear then launches it.
-    const restWx = gx + S * 1.0, restWy = gy - S * 0.30;
-    const wx = restWx + wedgeP * wedgeP * (S * 0.42 + 330 - S * 0.55);
-    const wy = restWy + wedgeP * wedgeP * (gy - S * 0.30 + 250 - restWy);
+    // the wedge's rest position — at the glyph's BASE (the pulled 5% slice
+    // lying at the brand object's foot, the thumbnail's promise). Clear of
+    // the host column (left), the stat column (right) and the glyph's
+    // bottom bowl (above it) by construction.
+    const restWx = gx + S * 0.86, restWy = gy + S * 1.49;
+    // the flight skims the floor toward the CAMERA-LEFT (the viewer's
+    // feet) — under the host's ground band, never into the stat column
+    const wx = restWx + wedgeP * wedgeP * -320;
+    const wy = restWy + wedgeP * wedgeP * 80;
     const wedgeScale = 1 + wedgeP * 0.6;
     // the resting pulled slice — visible from FRAME 0 on the cold open
     if (coldOpen && wedgeP <= 0) {
@@ -490,7 +512,7 @@ export function statRevealScene(g: SceneCtx): void {
       const age = bt - wedgeLand;
       const squashP = age >= 0 && age < 300 ? Math.sin((age / 300) * Math.PI) : 0;
       ctx.save();
-      ctx.translate(gx + S * 0.42 + 330, gy - S * 0.30 + 250);
+      ctx.translate(restWx - 320, restWy + 80);
       ctx.scale(1 + 0.16 * squashP, 1 - 0.2 * squashP);
       ctx.rotate(Math.sin(t / 900) * 0.03); // the settle breathe
       ctx.fillStyle = PALETTE.goldDisplay;
@@ -503,25 +525,19 @@ export function statRevealScene(g: SceneCtx): void {
       ctx.lineWidth = 3;
       ctx.stroke();
       ctx.restore();
-      impactRing(ctx, gx + S * 0.42 + 330, gy - S * 0.30 + 250, bt, wedgeLand, 130, 1.3);
+      impactRing(ctx, restWx - 320, restWy + 80, bt, wedgeLand, 130, 1.3);
     }
     // the host — the cold open WALKS THROUGH at 4s (enter 3.2s, cross the
     // left third mid-stride, plant 5.4s); other beats walk in from the
-    // group's start and bracket the stem.
+    // group's start and present the glyph from outside its bounding box.
     financeHost(g, hxR, Math.min(hyR, H * 0.64), hostRig, {
       seed: 4.2,
       gesture: 'present',
       glanceBias: 0.9,
       walkDur: coldOpen ? 2200 : 1800,
       walkAt: coldOpen ? 3200 : 0,
-      walkFrom: 140,
-      contact: coldOpen
-        ? undefined
-        : {
-            x: gx - S * 0.14, y: gy + S * 0.42,
-            hand: 'fist', easeAt: 2000,
-          },
-      declareId: coldOpen ? undefined : 'statReveal:pct',
+      walkFrom: 145,  // D-10: the stride band (\u00b1136 at rig 1.7) must start inside the frame
+      declareId: undefined,
       label: 'pct-host',
     });
   }
@@ -609,7 +625,6 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   const framing = (g.runIdx ?? 0) % 2;
   const rowLeft = framing === 0 ? 180 + 160 : 180;            // the row's first column x
   const rowRight = framing === 0 ? W - 180 : W - 440;         // the row's last column right edge
-  const hostX = framing === 0 ? rowLeft - 72 : rowRight + 90; // the host rail
 
   if (mode === 'gates') {
     // three precision chips
@@ -661,7 +676,10 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   WRAPPERS.forEach((wr, i) => {
     const isFocus = mode === 'summary' ? true : i === focus;
     const cw = mode === 'summary' ? fullW : isFocus ? bigW : othersW;
-    const othersBefore = mode === 'summary' ? 0 : WRAPPERS.slice(0, i).reduce((acc, _, j) => acc + (j === focus ? bigW : othersW) + gap, 0);
+    // D-09 evidence fix (b041 summary): the shipped offset gave EVERY
+    // summary column x = rowLeft — four cards stacked on one slot. The
+    // summary row spaces evenly like the focused row does.
+    const othersBefore = mode === 'summary' ? i * (fullW + gap) : WRAPPERS.slice(0, i).reduce((acc, _, j) => acc + (j === focus ? bigW : othersW) + gap, 0);
     const x = rowLeft + othersBefore;
     const p = clamp01((t - 300 - i * 260) / 650);
     if (p <= 0) return;
@@ -733,19 +751,26 @@ export function wrapperMatrixScene(g: SceneCtx): void {
   });
   // ── U7 (defect D19, THE HOST LEANS ON THE FOCUSED CARD) — the matrix's
   // own presenter stands in his rail and the near hand palms the focused
-  // card's edge at mid-height — the card is a desk he leans on, never a
-  // slide he stands beside. D-07: the rail follows the framing (left on
+  // card's edge at shoulder height — the card is a desk he leans on, never
+  // a slide he stands beside. D-07: the rail follows the framing (left on
   // even runs, right on odd runs).
+  // 100-JUDGE AUDIT (defect D-09 — THE HOST ON THE MATRIX, b034/b039): the
+  // shipped rails put the host's drawn torso 5-23px INSIDE the row's near
+  // card and the palm contact 120px below his shoulder — his body plated
+  // the ELTIF column and the column plated him back. The rail gap widens
+  // to 150px (a full drawn-torso width plus air) and the palm lands ON the
+  // row edge at SHOULDER height (the honest contact: within natural reach,
+  // no root pull). Figure and matrix each own their plane.
   if (mode !== 'gates') {
     // the host leans on THE ROW's near edge — focus 0 that IS the focused
     // card; focus 1-3 he leans on the row while presenting the focused
     // column (gaze toward it).
     registerRect('wrapperMatrix:focusEdge', framing === 0 ? rowLeft - 8 : rowRight - 18, top + 150, 26, 260);
-    financeHost(g, hostX, H * 0.65, 1.6, {
+    financeHost(g, framing === 0 ? rowLeft - 150 : rowRight + 150, H * 0.65, 1.6, {
       seed: 6.1 + framing * 0.9,
       gesture: 'present',
       glanceBias: framing === 0 ? 0.9 : -0.9,
-      contact: { x: framing === 0 ? rowLeft - 2 : rowRight + 4, y: top + 240, hand: 'palm', easeAt: 0 },
+      contact: { x: framing === 0 ? rowLeft - 2 : rowRight + 4, y: top + 170, hand: 'palm', easeAt: 0 },
       declareId: 'wrapperMatrix:focusEdge',
       label: 'matrix-host',
       hostBody: true,
@@ -888,12 +913,18 @@ export function flowLiquidityScene(g: SceneCtx): void {
   // U7/U1: the gate has an OPERATOR — the host stands at the redemption
   // window and his palm rests ON the ring's rim (a hand on the machinery
   // the whole chapter is about). Registered + declared for the guard.
+  // 100-JUDGE AUDIT (defect D-11 — THE RING THROUGH THE ARM, b043/b045): the
+  // shipped palm target sat 34px INSIDE the ring's radius — the arm crossed
+  // the 10px gold stroke to reach it and the circle read as painted OVER
+  // the host. The palm now lands ON the rim itself (the ring's left edge,
+  // at rim height) and the host steps back a full drawn-torso width: body
+  // outside the ring, hand ON the machinery, one honest contact.
   registerRect('flow:gate', gx - 138, gy - 138, 276, 276);
-  financeHost(g, gx - 202, H * 0.65, 1.6, {
+  financeHost(g, gx - 260, H * 0.65, 1.6, {
     seed: 7.7,
     gesture: 'present',
     glanceBias: 0.9,
-    contact: { x: gx - 98, y: gy + 44, hand: 'palm', easeAt: 800 },
+    contact: { x: gx - 134, y: gy + 10, hand: 'palm', easeAt: 800 },
     declareId: 'flow:gate',
     label: 'gate-host',
     hostBody: true,
@@ -1015,14 +1046,22 @@ export function prorationDemoScene(g: SceneCtx): void {
   ctx.fillRect(180, 246, 300, 6);
 
   // the two bars — the proration arithmetic made physical
+  // 100-JUDGE AUDIT (defect D-14 — LABELS UNDER THE FIGURE, b049-b050): the
+  // shipped layout stacked THREE owners on one band — the bars ran to
+  // x 1123, the $ values printed at 1163, the stage-1 "STILL INVESTED"
+  // card sat at 1183 (directly OVER the values), and the host's contact
+  // pull dragged his torso INTO the value column. Every element now owns
+  // a measured column: bars [240, 883], values [923, ~1240], the stage-1
+  // card a full-width band BELOW the bars [240, 1240], the host at 0.708W
+  // with his fingertip ON the $50,000's edge. No label runs under anyone.
   const bx = 240;
-  const bw = W * 0.46;
+  const bw = W * 0.335;
   const rows = [
     { k: 'YOU REQUESTED', v: '$100,000', frac: 1, tone: 'gold' as const },
     { k: 'YOU RECEIVED', v: '$50,000', frac: 0.5, tone: 'down' as const },
   ];
   rows.forEach((r, i) => {
-    const y = H * 0.33 + i * 190;
+    const y = H * 0.30 + i * 170;
     const e = easeOutCubic(clamp01((t - 400 - i * 800) / 700));
     if (e <= 0) return;
     ctx.save();
@@ -1045,54 +1084,52 @@ export function prorationDemoScene(g: SceneCtx): void {
     ctx.fillText(r.v, bx + bw + 40, y + 56);
     ctx.restore();
   });
-  // the denominator chip
+  // the denominator chip — its own band below the bars
   const dE = easeOutCubic(clamp01((t - 1500) / 600));
   if (dE > 0) {
     ctx.save();
     ctx.globalAlpha = dE;
-    chip(ctx, 'DENOMINATOR: 5% OF SHARES · REQUESTS \u2248 10%', bx, H * 0.60, {
+    chip(ctx, 'DENOMINATOR: 5% OF SHARES · REQUESTS \u2248 10%', bx, H * 0.556, {
       bg: PALETTE.chipBg, fg: PALETTE.inkSoft, border: PALETTE.cardBorder, size: LABEL_FLOOR,
     });
     ctx.restore();
   }
   // the remainder — still invested (stage 1 adds the resubmit question,
-  // parked BESIDE the bars: the caption zone stays clear)
+  // as a full-width band BELOW the chip: the value column and the host
+  // column stay untouched)
   if (stage === 1) {
     const e = easeOutCubic(clamp01((t - 400) / 700));
     if (e > 0) {
       ctx.save();
       ctx.globalAlpha = e;
-      const qx = bx + bw + 60;
-      // U1: the card narrows so the operator (the host at the $50,000) has
-      // his own column — the staging never plates the reading card.
-      const qw = W - qx - 430;
-      card(ctx, qx, H * 0.32, qw, 320, { r: 30 });
-      setFont(ctx, 46, 700, FONT_DISPLAY);
+      const cx1 = bx;
+      const cw1 = 1000;
+      const cy1 = H * 0.622;
+      card(ctx, cx1, cy1, cw1, 128, { r: 26 });
+      setFont(ctx, 42, 700, FONT_DISPLAY);
       ctx.fillStyle = PALETTE.ink;
-      const h1 = wrapText(ctx, 'THE OTHER $50,000 IS STILL INVESTED', qw - 88, 46, 700);
-      h1.forEach((ln, i) => ctx.fillText(ln, qx + 44, H * 0.32 + 66 + i * 56));
-      setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
+      ctx.fillText('THE OTHER $50,000 IS STILL INVESTED', cx1 + 40, cy1 + 52, cw1 - 80);
+      setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
       ctx.fillStyle = PALETTE.inkSoft;
-      const h2 = wrapText(ctx, 'Resubmission depends on the fund\u2019s procedures — do not assume an automatic queue.', qw - 88, 40, 400);
-      h2.slice(0, 3).forEach((ln, i) => ctx.fillText(ln, qx + 44, H * 0.32 + 130 + i * 52));
+      ctx.fillText('Resubmission depends on the fund\u2019s procedures — do not assume an automatic queue.', cx1 + 40, cy1 + 96, cw1 - 80);
       ctx.restore();
     }
   }
 
-  // the operator — the presenter AT the window, hand ON the $50,000 his
-  // sentence is about (U1's flagship fix: the fingertip lands ON the
-  // number's edge — the review's "open space short of the $50,000 figure"
-  // read is dead). U3: the rig rises 1.5 → 1.7.
+  // the operator — the presenter AT the window, fingertip ON the $50,000
+  // his sentence is about. D-14: the host stands at 0.708W — his drawn
+  // torso clears the value column by 12px and the contact lands on the
+  // number's right edge (within the solver's honest envelope).
   const scale = 1.7;
-  const hx = W * 0.81;
+  const hx = W * 0.708;
   const hy = H * 0.655;
-  registerRect('proration:value50k', bx + bw + 30, H * 0.33 + 190 - 8, 320, 84, 'content');
-  registerText('proration:value50kTxt', bx + bw + 30, H * 0.33 + 190 - 8, 320, 84);
+  registerRect('proration:value50k', bx + bw + 30, H * 0.30 + 170 - 8, 320, 84, 'content');
+  registerText('proration:value50kTxt', bx + bw + 30, H * 0.30 + 170 - 8, 320, 84);
   financeHost(g, hx, hy, scale, {
     seed: 7,
     gesture: 'present',
     glanceBias: -0.9,
-    contact: { x: bx + bw + 36, y: H * 0.33 + 190 + 34, hand: 'point', easeAt: 0 },
+    contact: { x: bx + bw + 317, y: H * 0.30 + 170 + 56, hand: 'point', easeAt: 0 },
     declareId: 'proration:value50kTxt',
     label: 'host',
   });
@@ -1481,9 +1518,13 @@ export function navGapScene(g: SceneCtx): void {
     ctx.restore();
     setFont(ctx, 72, 700, FONT_DISPLAY);
     ctx.fillStyle = '#8FB4E4';
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'right';
     ctx.globalAlpha = e2;
-    ctx.fillText('ECONOMIC 90', ex + tw / 2, baseY - h90 * e2 - 26);
+    // 100-JUDGE AUDIT (defect D-12 — THE HOST OCCLUDES THE DATA): the
+    // label centered under the tower ran 200px RIGHT of it — into the
+    // host column. Right-aligned to the tower's own right edge keeps the
+    // name ON the object it names.
+    ctx.fillText('ECONOMIC 90', ex + tw, baseY - h90 * e2 - 26);
     ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
     // the gap band
@@ -1501,7 +1542,10 @@ export function navGapScene(g: SceneCtx): void {
       ctx.setLineDash([]);
       setFont(ctx, LABEL_FLOOR, 700);
       ctx.fillStyle = PALETTE.downVivid;
-      ctx.fillText('THE GAP = WHO BEARS IT', nx + tw + 46, baseY - h90 - 20);
+      // D-12 companion: the tower name right-aligns to the economic tower
+      // (the host's column), so the chip lifts one ROW above the name —
+      // the two annotations own separate bands instead of overprinting.
+      ctx.fillText('THE GAP = WHO BEARS IT', nx + tw + 46, baseY - h90 - 96);
       ctx.restore();
     }
     // the flow captions — moved to the top chip row (right of the
@@ -1519,15 +1563,23 @@ export function navGapScene(g: SceneCtx): void {
       });
       ctx.restore();
     }
-    // U8: the PULL — the host between the towers, fist ON the economic
-    // tower's left edge (the contact rect rides the pulled tower).
-    // Registered + declared for the guard.
-    registerRect('navGap:econ', ex - 4, baseY - h90, 26, h90);
-    financeHost(g, ex - 120, H * 0.65, 1.6, {
+    // U8: the PULL — the host stands RIGHT of the economic tower and DRAGS
+    // the gap open — fist ON the tower's right edge (the contact rect rides
+    // the pulled tower). Registered + declared for the guard.
+    // 100-JUDGE AUDIT (defect D-12 — THE HOST IS THE GAP, b082-b083): the
+    // shipped staging parked him BETWEEN the towers — his torso filled the
+    // exact gap band the scene exists to show and his head plated the
+    // "THE GAP = WHO BEARS IT" chip. From the tower's right side the pull
+    // reads stronger (he drags the tower AWAY from NAV 100), the gap band
+    // + chip stay fully visible between the towers, and the right-aligned
+    // tower label clears his head band.
+    const pullHostX = ex + tw + 210 + pullX;
+    registerRect('navGap:econ', ex + tw + pullX - 4, baseY - h90, 26, h90);
+    financeHost(g, pullHostX, H * 0.65, 1.6, {
       seed: 9.4,
       gesture: 'present',
-      glanceBias: 0.9,
-      contact: { x: ex + 4, y: baseY - h90 * 0.45, hand: 'fist', easeAt: 1200 },
+      glanceBias: -0.9,
+      contact: { x: ex + tw + pullX + 4, y: baseY - h90 * 0.62, hand: 'fist', easeAt: 1200 },
       declareId: 'navGap:econ',
       label: 'pull-host',
       hostBody: true,
@@ -1652,11 +1704,13 @@ export function feeStackScene(g: SceneCtx): void {
   }
   ctx.restore();
 
-  // the stacked layers
+  // the stacked layers — the plates indent to x 340 (the D-11 head-channel
+  // fix) and keep the stack's right edge; the value lines shrink to FIT
+  // the narrower plate instead of compressing under fillText's maxWidth.
   // D-03: the five layers DEAL across the hold (the build spread — a 26s
   // feeStack beat lands its layers through the hold, not in 1.3s)
-  const lx = 240;
-  const lw = W * 0.52;
+  const lx = 340;
+  const lw = 1238 - 340;
   const feeRows = FEES.filter((f) => stage >= f.at);
   FEES.forEach((f, i) => {
     if (stage < f.at) return;
@@ -1680,7 +1734,15 @@ export function feeStackScene(g: SceneCtx): void {
     setFont(ctx, Math.max(LABEL_FLOOR, 36), 700);
     ctx.fillStyle = PALETTE.ink;
     ctx.fillText(f.k, lx + 36, y + 34, lw - 72);
-    setFont(ctx, Math.max(LABEL_FLOOR, 36), 400);
+    // D-11 companion: the value line FITS the narrower plate — measured
+    // shrink to 30px before the maxWidth compression ever engages.
+    const vSize = Math.max(LABEL_FLOOR, 36);
+    setFont(ctx, vSize, 400);
+    let vs2 = vSize;
+    while (vs2 > 30 && ctx.measureText(f.v).width > lw - 72) {
+      vs2 -= 2;
+      setFont(ctx, vs2, 400);
+    }
     ctx.fillStyle = PALETTE.inkSoft;
     ctx.fillText(f.v, lx + 36, y + 66, lw - 72);
     ctx.restore();
@@ -1691,31 +1753,37 @@ export function feeStackScene(g: SceneCtx): void {
     if (qe > 0) {
       ctx.save();
       ctx.globalAlpha = qe;
-      card(ctx, lx + lw + 60, H * 0.44, W * 0.24, 240, { r: 28 });
+      card(ctx, 1300, H * 0.44, W * 0.23, 240, { r: 28 });
       setFont(ctx, Math.max(TYPE_FLOOR, 40), 700);
       ctx.fillStyle = PALETTE.ink;
-      ctx.fillText('THE ALL-IN QUESTION', lx + lw + 96, H * 0.44 + 56, W * 0.24 - 72);
+      ctx.fillText('THE ALL-IN QUESTION', 1336, H * 0.44 + 56, W * 0.23 - 72);
       setFont(ctx, Math.max(LABEL_FLOOR, 34), 400);
-      const lines = wrapText(ctx, 'Total cost of the exposure you actually receive — after fees, financing, cash drag and underlying layers.', W * 0.24 - 72, 34, 400);
+      const lines = wrapText(ctx, 'Total cost of the exposure you actually receive — after fees, financing, cash drag and underlying layers.', W * 0.23 - 72, 34, 400);
       ctx.fillStyle = PALETTE.inkSoft;
-      lines.slice(0, 4).forEach((ln, li) => ctx.fillText(ln, lx + lw + 96, H * 0.44 + 104 + li * 42));
+      lines.slice(0, 4).forEach((ln, li) => ctx.fillText(ln, 1336, H * 0.44 + 104 + li * 42));
       ctx.restore();
     }
   }
   // U7/U1: the fee stack has a TELLER — the host leans at the stack's left
   // end, fist ON the top plate's edge (the layers are plates he deals, not
   // a list he reads). Registered + declared for the guard.
-  registerRect('feeStack:plateEdge', 240, H * 0.305, 70, 84);
+  // 100-JUDGE AUDIT (defect D-11 — THE TOP BAR CROSSES HIS HEAD, b087): the
+  // plates started 6px from his head's ink — the gold MANAGEMENT bar read
+  // as passing through his face. The stack indents to x 340 (a full head
+  // width of clear channel between his profile and the plates) and the
+  // fist lands ON the top plate's left edge at its own height — within
+  // natural reach, no root pull, the plate never touches the head.
+  registerRect('feeStack:plateEdge', 336, H * 0.305, 70, 84);
   financeHost(g, 170, H * 0.62, 1.6, {
     seed: 10.3,
     gesture: 'present',
     glanceBias: 0.9,
-    contact: { x: 248, y: H * 0.305 + 42, hand: 'fist', easeAt: 600 },
+    contact: { x: 344, y: H * 0.305 + 42, hand: 'fist', easeAt: 600 },
     declareId: 'feeStack:plateEdge',
     label: 'fees-host',
   });
   // U5: the auditor's line sweeps the fee stack
-  ledgerScan(ctx, 244, H * 0.305, lw - 20, 5 * 92, t, 10.3);
+  ledgerScan(ctx, 344, H * 0.305, lw - 20, 5 * 92, t, 10.3);
   sourceTag(ctx, W, 'BCRED published offering terms (Class S example) · recheck current terms before any allocation decision');
 }
 
@@ -1775,6 +1843,12 @@ export function bullCaseScene(g: SceneCtx): void {
   setFont(ctx, 56, 700, FONT_DISPLAY);
   ctx.fillStyle = TONE(data.tone).main;
   ctx.fillText(data.title.toUpperCase(), 300, top + 80, W - 940);
+  // 100-JUDGE AUDIT (defect D-09 — THE ROWS OUTRUN THE CARD, b103): the
+  // rows drew with fillText's maxWidth W-1080 = 840 — 112px past the
+  // card's right edge (x 1100), squeezed into the host's arm zone. The
+  // row width now FITS the card's interior (to x 1036) with a measured
+  // shrink — no row crosses the card edge, no row enters the host column.
+  const rowMaxW = W - 820 - 372 - 44;
   data.rows.forEach((r, i) => {
     const e = easeOutCubic(clamp01((t - 700 - i * 420) / 600));
     if (e <= 0) return;
@@ -1790,8 +1864,13 @@ export function bullCaseScene(g: SceneCtx): void {
     ctx.lineTo(344, top + 146 + i * 74 - 18);
     ctx.stroke();
     setFont(ctx, Math.max(TYPE_FLOOR, 40), 400);
+    let rs2 = Math.max(TYPE_FLOOR, 40);
+    while (rs2 > 30 && ctx.measureText(r).width > rowMaxW) {
+      rs2 -= 2;
+      setFont(ctx, rs2, 400);
+    }
     ctx.fillStyle = PALETTE.ink;
-    ctx.fillText(r, 372, top + 154 + i * 74, W - 1080);
+    ctx.fillText(r, 372, top + 154 + i * 74, rowMaxW);
     ctx.restore();
   });
 
@@ -1809,8 +1888,12 @@ export function bullCaseScene(g: SceneCtx): void {
   }
 
   // U1/U3: the panel has a SPEAKER — the host's palm rests ON the ledger
-  // card's right edge while the rows land (a hand on the argument he is
-  // making). Rig rises 1.45 → 1.7.
+  // card's right edge (the card spans 240..W-580; W-580 IS its right edge)
+  // while the rows land (a hand on the argument he is making). Rig 1.7.
+  // 100-JUDGE AUDIT (defect D-09 companion — b103): the rows used to run
+  // past the card's right edge into the host's arm zone — fixed above by
+  // the measured row width. The staging itself was already certified
+  // (palm ON the true edge, host outside the card's span) and stays.
   registerRect('bullCase:panelEdge', W - 580, top + 140, 22, 300);
   financeHost(g, W * 0.78, H * 0.65, 1.7, {
     seed: 11.1,
@@ -2187,17 +2270,22 @@ export function systemMapScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  // the host — closing the film AT the system: the operator's palm rests
-  // ON the MANAGER disc's rim (U1's flagship — the finger touches the
-  // MANAGER node the review named). Rig rises 1.5 → 1.7; the host steps
-  // in beside the ring instead of watching from the far margin.
+  // the host — closing the film AT the system: the operator stands OUTSIDE
+  // the ring's bounding box, presenting the MANAGER disc his palm can
+  // honestly reach.
+  // 100-JUDGE AUDIT (defect D-12 — HIM IN THE RING, b117-b119): the shipped
+  // staging parked the host ON the ring's right arc — his torso covered
+  // MANAGER + CONTRACT's label and his legs plated the EXITING node (the
+  // render shipped "MANA[host]G"). The rim-contact verb was the root
+  // cause (the solver pulled the body onto the diagram). The host now
+  // stands clear of the ring's right edge by a full torso width and
+  // PRESENTS the disc — the palm can reach the rim without the root ever
+  // entering the ring's bbox, and every label reads whole.
   registerRect('systemMap:manager', cx - 90, cy - 90, 180, 180);
-  financeHost(g, cx + R + 60, H * 0.64, 1.7, {
+  financeHost(g, cx + R + 128, H * 0.64, 1.7, {
     seed: 12.4,
     gesture: 'present',
     glanceBias: -0.9,
-    contact: { x: cx + 84, y: cy - 24, hand: 'point', easeAt: 900 },
-    declareId: 'systemMap:manager',
     label: 'system-host',
   });
 }

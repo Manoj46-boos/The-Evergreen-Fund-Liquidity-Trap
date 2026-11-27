@@ -618,15 +618,22 @@ export function chartJourneyScene(g: SceneCtx): void {
   // B18: the walker's CURRENT x — the same walkIn the presenter draw runs
   // below, computed early (walkIn is a pure function) so the annotation
   // search yields to the walker's real position instead of a guess.
+  // 100-JUDGE AUDIT (defect D-12 — THE WALKER INSIDE THE PLOT, b081): the
+  // axis walkway's three stations (430/815/1240) parked the presenter
+  // INSIDE the plot — his torso split the data lines on every held frame
+  // and the viewer lost the exact values the scene exists to show. The
+  // stations move to the plot's MARGINS (left of chartX, right of the
+  // plot's right edge): he still paces the axis (the draw-on walk-through
+  // is motion, not staging), but where he PLANTS the data reads whole.
   let walkerXNow = 815;
   {
-    const STN_E = [430, 815, 1240];
+    const STN_E = [200, 1700];
     const hIdxE = (id?: string): number => (id ? Math.floor(hashStr(id) * STN_E.length) % STN_E.length : 1);
     const curE = hIdxE(g.sentenceId);
     const prevE = g.prevSentenceId ? hIdxE(g.prevSentenceId) : 0;
     const stTE = g.sentenceT ?? 1e9;
     if (g.sceneT < 1700) {
-      walkerXNow = walkIn(Math.min(g.sceneT, 1700), 250, STN_E[curE], 1700, undefined, 1.2, 11).x;
+      walkerXNow = walkIn(Math.min(g.sceneT, 1700), 120, STN_E[curE], 1700, undefined, 1.2, 11).x;
     } else if (stTE < 900 && Math.abs(STN_E[curE] - STN_E[prevE]) >= 120) {
       walkerXNow = walkIn(stTE, STN_E[prevE], STN_E[curE], 900, undefined, 1.2, 11).x;
     } else {
@@ -834,7 +841,8 @@ export function chartJourneyScene(g: SceneCtx): void {
     // figure's feet land on its plate edge; the ids are deterministic from
     // the chip text (theme.chip's own registration).
     for (const c of chips) declareHostContact(`chip:${String(c).slice(0, 14)}`);
-    const STN = [430, 815, 1240];
+    // D-12: the margin stations (see the walkerXNow note above)
+    const STN = [200, 1700];
     const hIdx = (id?: string): number => (id ? Math.floor(hashStr(id) * STN.length) % STN.length : 1);
     const cur = hIdx(g.sentenceId);
     const prev = g.prevSentenceId ? hIdx(g.prevSentenceId) : 0;
@@ -849,7 +857,7 @@ export function chartJourneyScene(g: SceneCtx): void {
     if (g.sceneT < 1700) {
       // THE DRAW-ON ENTRANCE — the walkway read itself: he paces the axis
       // from the left edge as the chart draws in above him.
-      const r = walkIn(Math.min(g.sceneT, 1700), 250, STN[cur], 1700, arriveJ, 1.2, 11);
+      const r = walkIn(Math.min(g.sceneT, 1700), 120, STN[cur], 1700, arriveJ, 1.2, 11);
       hxJ = r.x; poseJ = r.walking ? r.pose : arriveJ; phaseJ = r.walking ? r.phase : undefined;
     } else if (stT < 900 && Math.abs(STN[cur] - STN[prev]) >= 120) {
       const r = walkIn(stT, STN[prev], STN[cur], 900, arriveJ, 1.2, 11);
@@ -859,16 +867,16 @@ export function chartJourneyScene(g: SceneCtx): void {
     }
     const talkJ = g.speaking ? talkAt(g.beatT, g.wordTimes) : 0;
     // B7 RE-SPEC (Visual Quality Audit §3.2 — THE WALKER IS AN ACTOR):
-    // planted contact. When he STANDS at a station and the line has drawn
-    // past him, his near hand FISTS ON THE DATA LINE at his own x — the
-    // grip the audit found missing ("the hand never grips the line; the
-    // figure skates on top of the plot as decoration"). The line's y at
-    // the station reproduces lineChart's own point mapping (px = x + xf*w,
-    // py from the padded min/max) so the fist lands exactly on the stroke;
-    // it is gated on the draw-on progress so he never grips ink that is
-    // not there yet, and clamped to the arm's natural cone.
+    // planted contact. When he STANDS at a station INSIDE the plot and the
+    // line has drawn past him, his near hand FISTS ON THE DATA LINE at his
+    // own x — the grip the audit found missing ("the hand never grips the
+    // line; the figure skates on top of the plot as decoration").
+    // D-12 gate: the stations now park OUTSIDE the plot's x-range (the
+    // margins), so the grip only fires when the station genuinely sits over
+    // drawn ink — a fist closing on air left of the plot would be the
+    // exact "nobody is supervising the frame" read the audit convicted.
     let gripJ: { x: number; y: number; hand: 'fist' } | undefined;
-    if (phaseJ === undefined) {
+    if (phaseJ === undefined && hxJ >= chartX && hxJ <= chartX + chartW) {
       const xfJ = (hxJ - chartX) / chartW;
       if (drawP >= xfJ + 0.02) {
         let yMinJ = Infinity, yMaxJ = -Infinity;
@@ -1372,8 +1380,8 @@ export function barsCompareScene(g: SceneCtx): void {
   // natural reach (no P2 root pull needed).
   // U3 (STANDARD MARKET VISUAL REVIEW — SCALE LAW): the bar-lineage host
   // rises 1.35 → 1.5 — the fist ON the bar cap reads at the feed.
-  hostSmall(g, 92, 'present', 13, H * 0.66, 1.5, 0, 'aha', 1.4, 1, true, 0.4,
-    undefined, undefined, { x: 198, y: 458, hand: 'fist' as const }, 'right');
+  hostSmall(g, 118, 'present', 13, H * 0.66, 1.5, 0, 'aha', 1.4, 1, true, 0.4,
+    undefined, undefined, { x: 224, y: 458, hand: 'fist' as const }, 'right');
 }
 
 // ── trioConverge scene ─────────────────────────────────────────────────────
