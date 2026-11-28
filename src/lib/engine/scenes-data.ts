@@ -8,11 +8,11 @@
 import { clamp, clamp01, easeInOutCubic, easeOutBack, easeOutCubic, hash01, hashStr, lerp, seamArrival, springTo } from './easing';
 import { PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, glowBlob, scenePlate, chapterFamily, chapterArch, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, FONT_DISPLAY, toneRoom, deskRule, valuePlaneFor, roomFill, STROKE, kickerChip, NUM } from './theme';
 import { bokehField, kMotifs, lightRays, drawK, drawK3D, sparkles, hazeBands, impactRing, microShake, depthShift } from './effects';
-import { SceneCtx } from './scene-context';
+import { SceneCtx, beatExpressionOf, declareOnScreenHeadline } from './scene-context';
 import { REACTIONS, reactionAt, reactionStart } from './scene-context';
 import { pivotTakeStart } from './pivots';
 import { lineChart, lineChartYBounds, pieChart, barRow, dotGrid, gauge, statCard, sourceTag, sceneTitle, wrapText } from './charts';
-import { Stickman, POSES, blendPose, accentPulse, take, walkIn } from './stickman';
+import { Stickman, POSES, blendPose, accentPulse, take, walkIn, accentFire } from './stickman';
 import { drawStickmanV2, drawHost, talkAt } from './stickman-v2';
 import { walkStrike, walkPush } from './scenes-host';
 import { registerRect, registerText, declareHostContact } from './collision';
@@ -30,7 +30,7 @@ import { scaleForFigureArea, registerHeroObject } from './composition';
 // a room. Callers that hand-picked a tone keep it; the rest inherit the
 // chapter's tone (the color journey), so the whole film carries a field.
 function bg(g: SceneCtx, seed: number, gold = 0.4, plate?: 'up' | 'down' | 'gold' | 'neutral'): void {
-  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
+  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone, g.walkPhase);
   // PHASE 4: the chapter family's OWNED room furniture rides the plate
   // (room architecture per chapter family, not re-tints — audit §7).
   scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', 0.95, chapterFamily(g.chapterIdx), { arch: chapterArch(g.chapterIdx) });
@@ -154,7 +154,14 @@ function hostSmall(
   // hand-prop slot ('holdCard' | 'coinStack'); the call site resolves it
   // through the prop ledger before passing. LAST position — existing call
   // sites are untouched.
-  prop?: 'holdCard' | 'coinStack'
+  prop?: 'holdCard' | 'coinStack',
+  // PROGRAM C-4 (KEYED IDLE BEHAVIORS — THE DATA FAMILY'S BEHAVIOR): a
+  // scene-space point on the chart card's edge — on every CONTENT word
+  // accent the near hand TAPS that edge (the presenter marking his own
+  // chart). Each tap fires its own contact easeAt (the C-5 landing dip
+  // rides the same clock). Only fires when the scene declares no contact
+  // of its own. Undefined = the legacy standing cycle.
+  edgeTap?: { x: number; y: number }
 ): void {
   // v10 (panel CHAR-1/CHAR-3): the side host CYCLES through a gesture set
   // instead of holding one pose for the whole scene — "two poses: shrug,
@@ -192,7 +199,23 @@ function hostSmall(
       sentenceDurMs: g.sentenceDurMs,
     wordTimes: g.gWordTimes,
     pointBias: bias,
+    // PROGRAM C-1: the expression-keyed gesture pool at every side host.
+    expression: beatExpressionOf(g.beat),
+    rigScale: scale,
   };
+  // PROGRAM C-4 — THE EDGE-TAP CLOCK: the most recent content-word accent
+  // inside the 480ms tap window drives the near hand onto the card edge.
+  let tapContact: { x: number; y: number; hand: 'point'; easeAt: number } | undefined;
+  if (edgeTap && !contact) {
+    let tapT = -1;
+    for (let wi = 0; wi < g.gWordTimes.length; wi++) {
+      const wt = g.gWordTimes[wi];
+      if (wt <= g.t && g.t - wt < 480 && accentFire(g.wordTexts[wi] ?? '')) {
+        if (wt > tapT) tapT = wt;
+      }
+    }
+    if (tapT >= 0) tapContact = { x: edgeTap.x, y: edgeTap.y, hand: 'point', easeAt: tapT };
+  }
   const poseA = Stickman.poseAt(g.t, { gesture: cycle[idx % 4], speaking: g.speaking, ...sentOpts });
   const poseB = Stickman.poseAt(g.t, { gesture: cycle[(idx + 1) % 4], speaking: g.speaking, ...sentOpts });
   const w = k > 0 ? clamp01(springTo(0, 1, k * 620, 150, 19)) : 0;
@@ -332,8 +355,9 @@ function hostSmall(
       // differential lives on hosts with clear space: the cold-open
       // shock and the editorial host.
       parallaxAmt: parallax ? parallaxD * (1 - clamp01(reaction)) : undefined,
-      // CONTACT VERBS: the solved hand — the scene declared the touch.
-      contact,
+      // CONTACT VERBS: the solved hand — the scene declared the touch, or
+      // the C-4 edge tap fires on this frame's accent.
+      contact: contact ?? tapContact,
       // P2 (Verdict report — CARRIED-PROP VERBS): the scene's hand prop,
       // ledger-resolved by the call site (holdCard on statCards, coinStack
       // on dotGrid). Drawn at the near hand — held, never floating.
@@ -349,7 +373,7 @@ function hostSmall(
   {
     const tier = STICK_BASE_HEIGHT * scale / g.H >= HOST_SCALE_TIERS.subject.minPct / 100 ? 'subject' : 'participant';
     registerFigure(g.beat.scene.sceneKey, 'side-host', tier, scale, g.H,
-      Boolean(contact) || gesture !== 'crossed');
+      Boolean(contact ?? tapContact) || gesture !== 'crossed');
   }
 }
 
@@ -501,7 +525,7 @@ export function chartTwinScene(g: SceneCtx): void {
       if (ap >= 1) sparkles(ctx, bx + chipW / 2, by + 42, t, 2600, { count: 10, radius: 220 });
     }
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
   // Fix 5.7 — THE FUSED PRESENTER. The old staging put a 0.85× crossed
   // figure ON the right card's top edge (certified in Phase 1 as the
   // crossed refusal because nothing was reachable from the perch); the
@@ -546,6 +570,12 @@ export function chartJourneyScene(g: SceneCtx): void {
   // frame bound (sceneTitle:Nasdaq-100, 46px). The journey charts ride the
   // frame's midline now; the truck sweeps AROUND them.
   sceneTitle(ctx, title, 330, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = title;
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // PLAYBOOK D3 (probe-verified): chartW narrows so the ch2 hero TRUCK
   // (+190px at scale 1.12) cannot push the plot past the right bound —
   // right edge 1580 → screen 1898 at worst, inside the frame.
@@ -944,7 +974,7 @@ export function chartJourneyScene(g: SceneCtx): void {
     // gesture cycle's pointIn term is the declared contact verb).
     registerFigure(g.beat.scene.sceneKey, 'axis-walker', 'participant', 1.2, H, true);
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── pieChart scene wrapper ──────────────────────────────────────────────────
@@ -952,6 +982,12 @@ export function pieChartScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 81, 0.6, 'gold'); // v10: the data room plate (gold — the wealth scene)
   sceneTitle(ctx, s.title as string, 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = s.title as string;
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // AUDIT-ROUND-2 (fix 4): the pie yields the left third's margin so the
   // host can stand beside the legend — cx W*0.34 → W*0.30.
   const cx = W * 0.30;
@@ -1053,7 +1089,7 @@ export function pieChartScene(g: SceneCtx): void {
   // 'left' — he stands left of centre but his content is further left).
   hostSmall(g, hxPie, 'pointL', 6, hyPie, 1.35, 0, 'aha', 1.4, 1, true, 0.4,
     undefined, undefined, { x: pieTouch.x, y: pieTouch.y, hand: 'palm' }, 'left');
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── dotGrid scene ────────────────────────────────────────────────────────────
@@ -1061,6 +1097,12 @@ export function dotGridScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 91, 0.4, 'up'); // v10: the data room plate
   sceneTitle(ctx, 'The S&P 500 · one bonus pool, 500 companies', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'The S&P 500 · one bonus pool, 500 companies';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // v10 (PANEL-11 D-01 — VERIFIED DEFECT RETIRED): the v9 frame drew a gold
   // bracket at y=190 — the exact baseline band of the scene title — with a
   // "10 of 500" badge and "these ten" text on top of the headline and its
@@ -1180,6 +1222,12 @@ export function magChipsScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 101, 0.55);
   sceneTitle(ctx, 'The Magnificent Seven', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'The Magnificent Seven';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   const chipsList = (s.chips as string[]) || [];
   // 7 gold tiles with ticker-style look
   // PLAYBOOK D3 follow-up: tw 210 → 204 — the seventh tile's right edge
@@ -1275,7 +1323,7 @@ export function magChipsScene(g: SceneCtx): void {
     hostSmall(g, 185, 'present', 22, H * 0.66, 1.2, 0, 'aha', 1.4, 1, false, 0.4,
       undefined, undefined, { x: 261, y: H * 0.50 + 60, hand: 'palm' as const }, 'right', true);
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── barsCompare scene ────────────────────────────────────────────────────────
@@ -1283,6 +1331,12 @@ export function barsCompareScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 111, 0.4, 'gold'); // v10: the data room plate (gold — the winner chart)
   sceneTitle(ctx, s.title as string, 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = s.title as string;
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   const bars = (s.bars as any[]) || [];
   const barW = W - 620;
   const yMax = (s.yMax as number) || Math.max(...bars.map((b) => b.value), 1) * 1.15;
@@ -1363,7 +1417,7 @@ export function barsCompareScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
   // v10.1 (panel 11 re-review, host-vs-content): the biggest bar's tag
   // chip ("a bigger share…", ends ≈x1598+) ran 34px under the W*0.9 side
   // host's envelope (guard-caught @528-541s). Same answer as chartTwin:
@@ -1421,6 +1475,12 @@ export function trioConvergeScene(g: SceneCtx): void {
   const items = s.items as Array<{ big: string; label: string; tone: string }> | undefined;
   const useItems = Array.isArray(items) && items.length === 3;
   sceneTitle(ctx, String(s.title ?? 'Three surveys. One shape.'), 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = String(s.title ?? 'Three surveys. One shape.');
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   const names = useItems
     ? items!.map((it) => String(it.big))
     : ['Gallup', 'Univ. of Michigan', 'Conference Board'];
@@ -1748,7 +1808,7 @@ export function kDefScene(g: SceneCtx): void {
   // (pointR + faceDir right). Contact shadow where palm meets card.
   hostSmall(g, 900, 'pointR', 15, g.H * 0.66, 1.35, 0, 'aha', 1.4, 1, true, 0.55,
     undefined, undefined, { x: 774, y: 470, hand: 'palm' }, 'right'); // P2-4: hero moment — the naming beat rides the deep differential
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── credibilityChips ─────────────────────────────────────────────────────────
@@ -1756,6 +1816,12 @@ export function credibilityChipsScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 141, 0.6);
   sceneTitle(ctx, 'This isn\u2019t an internet theory', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'This isn\u2019t an internet theory';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   const chipsList = (s.chips as string[]) || [];
   const cw = 640;
   chipsList.forEach((c, i) => {
@@ -1808,6 +1874,12 @@ export function gasPumpScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 151, 0.4, 'up'); // v10: the data room plate
   sceneTitle(ctx, 'Same shock — different roads', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'Same shock — different roads';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // v10 (PANEL-11 D-02 + panel PROP-1): TWO retired defects in one rebuild.
   // (1) D-02: the scene caption at y≈992 intersected the source tag at
   // y≈1020 ("shock" crossing "Source:" — vision-verified). The caption now
@@ -2319,7 +2391,7 @@ export function gasPumpScene(g: SceneCtx): void {
         contact: { x: 866, y: 545, hand: 'palm' },
       }, 30);
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── recessionGauge scene ─────────────────────────────────────────────────
@@ -2327,6 +2399,12 @@ export function recessionGaugeScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 161);
   sceneTitle(ctx, 'Recession odds — serious people, different answers', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'Recession odds — serious people, different answers';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // ── 100-JUDGE PANEL / PHASE 3 item 3.3 — ONE TEXT SYSTEM PER FRAME ──
   // (report §6 Phase 3: "recessionGauge loses the bio-card captions when
   // the gauge is the subject — the VO already speaks them"). The shipped
@@ -2525,7 +2603,7 @@ export function recessionGaugeScene(g: SceneCtx): void {
     // rides the occupancy raise above (the registry must match the draw).
     registerFigure(g.beat.scene.type, 'gauge-host', 'subject', subjectRig, g.H, true);
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── aiDatacenter scene (3D-ish racks) ───────────────────────────────────
@@ -3153,6 +3231,12 @@ export function statCardsScene(g: SceneCtx): void {
   const { ctx, W, H, t, s } = g;
   bg(g, 181, 0.55);
   sceneTitle(ctx, 'The numbers, plainly', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = 'The numbers, plainly';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   // AUDIT-ROUND-2 (fix 2 — ONE HERO PER FRAME): the three equal cards read
   // at the phone gate as "crowded at phone width; cards read clip-arty" —
   // three competing masses, none dominant. The panel's rule: one dominant
@@ -3337,7 +3421,35 @@ export function statCardsScene(g: SceneCtx): void {
     ctx.restore();
   });
   ctx.restore();
-  sourceTag(ctx, W, s.source as string);
+  // PROGRAM E-2 (THE HOLD-LIFE LAW — HIGHLIGHT ROTATION ACROSS CARDS): on
+  // a long read the demoted chips take turns owning the frame's accent —
+  // every 4.5s the next chip lifts under a gold bracket and its ledger
+  // rule re-inks (a real, deterministic content event the hold-life gate
+  // can measure). Zero outside the rotation windows; pure f(t); drawn
+  // AFTER the chips (the bracket outlines the landed chip).
+  {
+    const rotN = Math.max(1, chips.length);
+    const rotT = Math.max(0, t - 2600);
+    if (rotT > 0 && chips.length > 0) {
+      const rot = Math.floor(rotT / 4500) % rotN;
+      const rotK = Math.sin(Math.PI * ((rotT % 4500) / 4500));
+      const c = chips[rot];
+      const ct = TONE(c.tone || 'up');
+      const cx2 = 180 + rot * (hw / 2);
+      const cy2 = hy0 + hh + 34 - 6 * rotK;
+      ctx.save();
+      ctx.globalAlpha = 0.9 * rotK;
+      ctx.strokeStyle = rgba(PALETTE.gold, 0.85);
+      ctx.lineWidth = 3;
+      roundRect(ctx, cx2 - 6, cy2 - 6, hw / 2 - 28, 96, 44);
+      ctx.stroke();
+      ctx.fillStyle = rgba(ct.main, 0.9);
+      roundRect(ctx, cx2 + 30, cy2 + 14, 44 * rotK, 5, 2.5);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
   // AUDIT-ROUND-2 (fix 4 — UN-STRAND THE HOST): the host at W*0.845 was
   // "cropped awkwardly and gestures at nothing" — the content now ends at
   // x 1330 (the hero card) and the host stands BESIDE it in his gesture
@@ -3828,6 +3940,8 @@ export function fundSplitScene(g: SceneCtx): void {
   const titleX = rSpec.px + (180 - rSpec.px) / rsR;
   // (title row 150->190 as all sceneTitle sites — D-08; see charts.sceneTitle)
   sceneTitle(ctx, 'What\u2019s inside “the S&P 500”?', titleX, 220, clamp01(t / 600)); // AUDIT-2 §10.3: +24px left margin — clears the raised camera stack
+  // PROGRAM E-4 (caption dedup everywhere): the drawer declares its title.
+  declareOnScreenHeadline('What\u2019s inside the S&P 500?');
   // the fund box
   const bx = W * 0.09;
   const by = H * 0.24;
@@ -4185,6 +4299,12 @@ export function oddsSpreadScene(g: SceneCtx): void {
   // SCRIPT): the drawer joins the beat rotation for any range-on-a-track
   // beat — the honest-range title becomes a prop (default preserved).
   sceneTitle(ctx, (s.title as string) || 'Recession odds — the honest range', 180, 220, clamp01(t / 600));
+  // PROGRAM E-4 (caption dedup everywhere): the drawer DECLARES the
+  // title it prints — the karaoke pill stands down for windows that repeat it.
+  {
+    const _st = (s.title as string) || 'Recession odds — the honest range';
+    declareOnScreenHeadline(String(Array.isArray(_st) ? _st.join(" ") : _st));
+  }
   const trackY = H * 0.42;
   const trackX = 220;
   const trackW = W - 440;
@@ -4470,7 +4590,7 @@ export function oddsSpreadScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, s.source as string);
+  sourceTag(ctx, W, s.source as string, 1005, 0.55, { beatP: g.beatP });
 }
 
 export { drawK3D, drawK, glowBlob };

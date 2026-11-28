@@ -14,7 +14,7 @@
  * the READ/LABEL floors, and obeys the one-light + one-extrusion rules.
  */
 
-import { clamp01, easeOutCubic, easeOutQuad, easeInOutSine, hash01, springTo, impactSquash, landSettle, windUp, lerp } from './easing';
+import { clamp01, easeOutCubic, easeOutQuad, easeInOutSine, hash01, springTo, impactSquash, landSettle, windUp, lerp, slamStrike, cardEnter } from './easing';
 import {
   PALETTE, TONE, card, chip, chipWidth, rgba, roundRect, setFont, paintBg, scenePlate, chapterArch,
   glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP, TYPE_FLOOR, LABEL_FLOOR, toneRoom, STROKE, NUM,
@@ -26,7 +26,7 @@ import {
 } from './effects';
 import { SceneCtx, declareOnScreenHeadline } from './scene-context';
 import { wrapText, sourceTag } from './charts';
-import { Stickman, POSES, blendPose, walkIn } from './stickman';
+import { Stickman, POSES, blendPose, walkIn, accentFire } from './stickman';
 import { drawStickmanV2, talkAt } from './stickman-v2';
 import { walkStrike, expressionPose, expressionBodyOf } from './scenes-host';
 import { registerRect, registerText, declareHostContact } from './collision';
@@ -37,7 +37,7 @@ import { beatExpressionOf } from './scene-context';
 /** the shared room: vault background + chapter plate */
 function bg(g: SceneCtx, opts: { strength?: number; furniture?: boolean; plate?: 'up' | 'down' | 'gold' | 'neutral' } = {}): void {
   const { strength = 0.9, furniture = true, plate } = opts;
-  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
+  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone, g.walkPhase);
   scenePlate(g.ctx, g.W, g.H, plate ?? g.chapterTone ?? 'up', strength, undefined, { furniture, arch: chapterArch(g.chapterIdx) });
 }
 
@@ -80,6 +80,13 @@ function financeHost(
     /** A-4 (the rope haul): the pull's strain — the body leans back into
      *  the rope (lean + rootY terms, sine-ramped by the scene). */
     leanBack?: number;
+    /** PROGRAM C-4 (KEYED IDLE BEHAVIORS — THE DATA FAMILY'S BEHAVIOR):
+     *  a scene-space point on the chart card's edge — on every CONTENT
+     *  word accent the near hand taps that edge (the presenter marking his
+     *  own chart on the emphasized words). Each tap fires its own
+     *  contact easeAt, so the C-5 landing dip rides the same clock. Only
+     *  applies when the scene declares no contact of its own. */
+    edgeTap?: { x: number; y: number };
   }
 ): void {
   const { ctx, t } = g;
@@ -93,6 +100,10 @@ function financeHost(
     wordTimes: g.gWordTimes,
     words: g.wordTexts,
     glanceBias: opts.glanceBias ?? 0,
+    // PROGRAM C-1: the expression-keyed gesture pool — urgency draws
+    // shock/wry, reveals aha, calm close/leanIn, at every data staging.
+    expression: beatExpressionOf(g.beat),
+    rigScale: scale,
   });
   // U4: the voStyle face — every data-scene beat inherits an expression.
   // D-16: the face AND the body register ride every data-scene host.
@@ -109,6 +120,19 @@ function financeHost(
   let x = hx;
   let groundY = hy;
   let walkPhase: number | undefined;
+  // PROGRAM C-4 — THE EDGE TAP CLOCK: the most recent content-word accent
+  // inside the 480ms tap window drives the near hand onto the card edge.
+  let tapContact: { x: number; y: number; hand: 'point'; easeAt: number } | undefined;
+  if (opts.edgeTap && !opts.contact) {
+    let tapT = -1;
+    for (let wi = 0; wi < g.gWordTimes.length; wi++) {
+      const wt = g.gWordTimes[wi];
+      if (wt <= t && t - wt < 480 && accentFire(g.wordTexts[wi] ?? '')) {
+        if (wt > tapT) tapT = wt;
+      }
+    }
+    if (tapT >= 0) tapContact = { x: opts.edgeTap.x, y: opts.edgeTap.y, hand: 'point', easeAt: tapT };
+  }
   if (opts.stageX !== undefined) {
     // A-3: the scene owns the path (the mount, the ring walk) — the stride
     // cycle plays while the scene says the figure is in transit.
@@ -137,10 +161,10 @@ function financeHost(
     walkPhase,
     hostBody: opts.hostBody === true,
     wordTexts: g.wordTexts, wordTimes: g.gWordTimes, beatT: g.beatT,
-    contact: opts.contact,
+    contact: opts.contact ?? tapContact,
     parallax: true,
   }, opts.seed);
-  if (opts.contact && opts.declareId) declareHostContact(opts.declareId);
+  if ((opts.contact ?? tapContact) && opts.declareId) declareHostContact(opts.declareId);
 }
 
 /** a glass data column heading — brass numeral ring + label */
@@ -336,7 +360,9 @@ export function statRevealScene(g: SceneCtx): void {
   // re-grow (c9-return, the same brass % landing through growP) landed with
   // zero deformation. growP completes at bt 2500 — the same squash grammar
   // about the glyph's ground contact, driven by impactSquash. Pure f(bt).
-  const finaleSq = !coldOpen && opening ? impactSquash(bt - 2500) : 0;
+  // PROGRAM D-1: the finale landing routes through the unified slamStrike
+  // grammar (mass 1.1 — the hero verdict lands heavier than a card).
+  const finaleSq = !coldOpen && opening ? slamStrike(bt - 2500, 1.1) : 0;
 
   if (coldOpen) {
     // BEAT 1 — the landing event at frame 0 (the ring reads even on the
@@ -559,16 +585,24 @@ export function statRevealScene(g: SceneCtx): void {
     const pullCX = (restWx + dockX) / 2, pullCY = restWy + 54;
     const bez = (p0: number, p1: number, p2: number, u: number): number =>
       (1 - u) * (1 - u) * p0 + 2 * (1 - u) * u * p1 + u * u * p2;
-    const wwx = bez(restWx, pullCX, dockX, pullP);
-    const wwy = bez(restWy, pullCY, dockY, pullP);
+    // PROGRAM D-2 (THE ANTICIPATION LAW — THE % SLICE SHEARS BACK): "the
+    // % slice shears back ~20px before launching" — during the first 22%
+    // of the launch window the slice pulls AWAY from its flight axis (the
+    // rope's load resisting, the wedge coiling), then releases into the
+    // flight. windUp(p) is the shared law (zero at both ends).
+    const shear = windUp(pullP) * 20;
+    const wwx = bez(restWx, pullCX, dockX, pullP) + shear;
+    const wwy = bez(restWy, pullCY, dockY, pullP) - shear * 0.25;
     // the rope grip — the scene-space point the near hand parks on (within
     // arm reach of the planted stage: shoulder ≈ (hxR+60, 528) → grip
     // ≈ 108px, no root pull)
     const gripX = hxR + 140, gripY = gy + S * 0.86;
     // the flight skims the floor toward the CAMERA-LEFT (the viewer's
     // feet) — under the host's ground band, never into the stat column
-    const wx = restWx + wedgeP * wedgeP * -320;
-    const wy = restWy + wedgeP * wedgeP * 80;
+    // PROGRAM D-2: the prorate flight carries the same shear-back law —
+    // the slice coils +20px against its launch axis before it flies.
+    const wx = restWx + wedgeP * wedgeP * -320 + windUp(wedgeP) * 20;
+    const wy = restWy + wedgeP * wedgeP * 80 - windUp(wedgeP) * 5;
     const wedgeScale = 1 + wedgeP * 0.6;
     // the resting pulled slice — visible from FRAME 0 on the cold open
     // (until the rope haul lifts it out of its rest)
@@ -694,6 +728,11 @@ export function statRevealScene(g: SceneCtx): void {
       contact: coldOpen && ropeP > 0.4 && pullP < 1
         ? { x: gripX, y: gripY, hand: 'fist', easeAt: 3000 }
         : undefined,
+      // PROGRAM C-4 (THE DATA FAMILY'S KEYED BEHAVIOR): off the cold open,
+      // the host taps the brass glyph's lower-left rim on every content
+      // word accent — the presenter marking his own object on the
+      // emphasized words (the tap's easeAt also fires the C-5 landing dip).
+      edgeTap: coldOpen ? undefined : { x: gx - S * 0.55, y: gy + S * 0.92 },
     });
     // THE ROPE — the poster's mechanic, imported (A-4): from the grip the
     // rope runs to the wedge (tracking the haul's live position), sagging
@@ -728,7 +767,7 @@ export function statRevealScene(g: SceneCtx): void {
   }
   // corner source note — the proration arithmetic
   if (mode === 'prorate') {
-    sourceTag(ctx, W, 'Illustration: 5% fund-level share cap, all shareholders requesting full exit — proration, not a forecast (SEC Investor.gov)');
+    sourceTag(ctx, W, 'Illustration: 5% fund-level share cap, all shareholders requesting full exit — proration, not a forecast (SEC Investor.gov)', 1005, 0.55, { beatP: g.beatP });
   }
 }
 
@@ -809,10 +848,16 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       // D-03: the three precision rows land across the hold (the build
       // spread — a 13s gates beat no longer finishes its build at 1.7s)
       const y = H * 0.315 + i * 158;
-      const e = easeOutCubic(clamp01((t - holdBeat(g, i, 3)) / 700));
+      const rawE = clamp01((t - holdBeat(g, i, 3)) / 700);
+      const e = easeOutCubic(rawE);
       if (e <= 0) return;
       ctx.save();
       ctx.globalAlpha = e;
+      // PROGRAM D-3: the row's geometry rides cardEnter (the 4% overshoot-
+      // and-settle); alpha stays easeOutCubic.
+      ctx.translate(240 + (W - 480) / 2, y + 132);
+      ctx.scale(0.965 + 0.035 * cardEnter(rawE), 0.965 + 0.035 * cardEnter(rawE));
+      ctx.translate(-(240 + (W - 480) / 2), -(y + 132));
       card(ctx, 240, y, W - 480, 132, { r: 30, tint: TONE(r.tone).main });
       ctx.restore();
       setFont(ctx, 50, 700, FONT_DISPLAY);
@@ -857,6 +902,21 @@ export function wrapperMatrixScene(g: SceneCtx): void {
     if (p <= 0) return;
     ctx.save();
     ctx.globalAlpha = easeOutCubic(p);
+    // PROGRAM D-3 + D-1 (FOLLOW-THROUGH AS THE DEFAULT ENTRANCE / THE
+    // slamStrike GRAMMAR): the card's GEOMETRY rides cardEnter (the 4%
+    // overshoot-and-settle back-out) and lands through slamStrike (the
+    // 6%/3% volume squash about its own base line + the negative
+    // overshoot). Alpha stays easeOutCubic — an opacity never overshoots.
+    // Pure f(t); at p=1 and outside the windows the transform is identity.
+    const wmLandT = 300 + i * 260 + 650;
+    const wmEnter = cardEnter(p);
+    const wmSq = slamStrike(t - wmLandT, 0.85);
+    ctx.translate(x + cw / 2, bot);
+    ctx.scale(
+      0.94 + 0.06 * wmEnter + 0.03 * wmSq,
+      (0.94 + 0.06 * wmEnter) * (1 - 0.06 * wmSq)
+    );
+    ctx.translate(-(x + cw / 2), -bot);
     if (isFocus || mode === 'summary') {
       card(ctx, x, top, cw, bot - top, { r: 30, glow: isFocus ? rgba(PALETTE.gold, 0.22) : undefined });
       // the card()'s auto-registered rect (card@x,top) — remember the ones
@@ -967,7 +1027,7 @@ export function wrapperMatrixScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, 'Sources: SEC Investor.gov · Federal Reserve FEDS note · BCRED published terms · ELTIF 2.0 / final RTS');
+  sourceTag(ctx, W, 'Sources: SEC Investor.gov · Federal Reserve FEDS note · BCRED published terms · ELTIF 2.0 / final RTS', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── flowLiquidity — the cash plumbing ──────────────────────────────────────
@@ -1027,10 +1087,15 @@ export function flowLiquidityScene(g: SceneCtx): void {
   // D-03: the five sources land across the hold (the build spread)
   SOURCES.forEach((src, i) => {
     const y = top + i * rowH;
-    const e = easeOutCubic(clamp01((t - holdBeat(g, i, SOURCES.length, 0.5)) / 600));
+    const rawE = clamp01((t - holdBeat(g, i, SOURCES.length, 0.5)) / 600);
+    const e = easeOutCubic(rawE);
     if (e <= 0) return;
     ctx.save();
     ctx.globalAlpha = e;
+    // PROGRAM D-3: the row's geometry rides cardEnter; alpha stays cubic.
+    ctx.translate(lx + lw / 2, y + (rowH - 12) / 2);
+    ctx.scale(0.965 + 0.035 * cardEnter(rawE), 0.965 + 0.035 * cardEnter(rawE));
+    ctx.translate(-(lx + lw / 2), -(y + (rowH - 12) / 2));
     const stress = mode === 'stress' && (i === 0 || i === 1);
     // VAULT NOIR fix: rows compact to h 76 — the fifth source card's
     // registered bottom (786 at the old pitch) crossed the 2-row caption
@@ -1260,7 +1325,7 @@ export function flowLiquidityScene(g: SceneCtx): void {
       ctx.restore();
     }
   }
-  sourceTag(ctx, W, 'Framework: Federal Reserve staff note (FEDS, Oct 2026) — liquidity sources, queues, moderate vs severe stress');
+  sourceTag(ctx, W, 'Framework: Federal Reserve staff note (FEDS, Oct 2026) — liquidity sources, queues, moderate vs severe stress', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── prorationDemo — requested ≠ fulfilled ──────────────────────────────────
@@ -1367,7 +1432,7 @@ export function prorationDemoScene(g: SceneCtx): void {
     declareId: 'proration:value50kTxt',
     label: 'host',
   });
-  sourceTag(ctx, W, 'Illustration: uniform pro-rata treatment (SEC guidance) — actual procedures vary by fund');
+  sourceTag(ctx, W, 'Illustration: uniform pro-rata treatment (SEC guidance) — actual procedures vary by fund', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── caseFiles — three cases, dates and denominators on every number ────────
@@ -1555,7 +1620,9 @@ export function caseFilesScene(g: SceneCtx): void {
     //   for 700ms after the landing (±2.4px), the dossier SETTLING on the
     //   desk instead of freezing.
     {
-      const flapSq = impactSquash(t - 1050);
+      // PROGRAM D-1: the dossier flap routes through the unified
+      // slamStrike grammar (mass 0.6 — light paper, lighter than a plate).
+      const flapSq = slamStrike(t - 1050, 0.6);
       const settle = landSettle(t - 1050) * 2.4;
       if (flapSq !== 0) {
         ctx.translate((cardLeft + cardRight) / 2, bot);
@@ -1707,7 +1774,7 @@ export function caseFilesScene(g: SceneCtx): void {
   }
   // U5: the auditor's line sweeps the dossier (the read is visible)
   ledgerScan(ctx, 200, top + 20, W - 400, bot - top - 40, t, 3.1);
-  sourceTag(ctx, W, c.src);
+  sourceTag(ctx, W, c.src, 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── navGap — NAV 100 vs economic 90 ────────────────────────────────────────
@@ -1758,6 +1825,18 @@ export function navGapScene(g: SceneCtx): void {
     const h90 = (H * 0.34) * 0.9;
     const e1 = easeOutCubic(clamp01((t - 400) / 800));
     const e2 = easeOutCubic(clamp01((t - 1100) / 800));
+    // PROGRAM D-2 (THE ANTICIPATION LAW — BARS DIP BEFORE RISING): each
+    // tower COILS before it rises — during the first 22% of its raw
+    // window the bar compresses 2% into its own base line (the spring
+    // loading), then releases into the easeOutCubic rise. Pure f(t).
+    const wu1 = windUp(clamp01((t - 400) / 800));
+    const wu2 = windUp(clamp01((t - 1100) / 800));
+    // PROGRAM D-1 (THE slamStrike GRAMMAR — NAVGAP BARS): each tower's
+    // ARRIVAL (the ease completing) lands through slamStrike — 6% vertical
+    // squash + 3% horizontal stretch about the base line, the negative
+    // overshoot swinging the volume back. mass 0.9 — the steel data bar.
+    const landSq1 = slamStrike(t - 1200, 0.9);
+    const landSq2 = slamStrike(t - 1900, 0.9);
     // the NAV tower (brass) — squash-pulses with the pull (U11 on the bars)
     ctx.save();
     ctx.globalAlpha = e1;
@@ -1767,7 +1846,9 @@ export function navGapScene(g: SceneCtx): void {
     g1.addColorStop(1, PALETTE.goldDeep);
     ctx.fillStyle = g1;
     ctx.translate(nx + tw / 2, baseY);
-    ctx.scale(sq1, 1);
+    // D-2: the pre-rise coil — the bar compresses into its base (the
+    // dip), then the D-1 arrival squash lands at the ease's completion
+    ctx.scale(sq1 * (1 + 0.03 * landSq1 + 0.02 * wu1), (1 - 0.06 * landSq1) * (1 - 0.02 * wu1));
     roundRect(ctx, -tw / 2, -h100 * e1, tw, h100 * e1, 10);
     ctx.fill();
     ctx.restore();
@@ -1787,7 +1868,7 @@ export function navGapScene(g: SceneCtx): void {
     g2.addColorStop(1, '#3A558A');
     ctx.fillStyle = g2;
     ctx.translate(ex + tw / 2, baseY);
-    ctx.scale(sq2, 1);
+    ctx.scale(sq2 * (1 + 0.03 * landSq2 + 0.02 * wu2), (1 - 0.06 * landSq2) * (1 - 0.02 * wu2));
     roundRect(ctx, -tw / 2, -h90 * e2, tw, h90 * e2, 10);
     ctx.fill();
     ctx.restore();
@@ -1929,10 +2010,15 @@ export function navGapScene(g: SceneCtx): void {
       // third card's registered bottom 732 clears the 2-row pill under
       // the certified 1.06 camera envelope.
       if (stage < r.at) return;
-      const e = easeOutCubic(clamp01((t - 400 - r.at * 500) / 650));
+      const rawE = clamp01((t - 400 - r.at * 500) / 650);
+      const e = easeOutCubic(rawE);
       if (e <= 0) return;
       ctx.save();
       ctx.globalAlpha = e;
+      // PROGRAM D-3: the row rides cardEnter (overshoot-and-settle).
+      ctx.translate(240 + (W - 900) / 2, ry + 128);
+      ctx.scale(0.965 + 0.035 * cardEnter(rawE), 0.965 + 0.035 * cardEnter(rawE));
+      ctx.translate(-(240 + (W - 900) / 2), -(ry + 128));
       card(ctx, 240, ry, W - 900, 128, { r: 30, tint: TONE(r.tone).main }); // U7: narrowed — the marks-host leans from his own column
       setFont(ctx, 46, 700, FONT_DISPLAY);
       ctx.fillStyle = TONE(r.tone).main;
@@ -1981,7 +2067,7 @@ export function navGapScene(g: SceneCtx): void {
     const baseY2 = H * 0.73;
     ledgerScan(ctx, W * 0.16, baseY2 - H * 0.36, W * 0.62, H * 0.36, t, 9.9);
   }
-  sourceTag(ctx, W, 'SEC fair-value requirements · Federal Reserve FEDS note (Oct 2026) — valuation opacity and redemption incentives');
+  sourceTag(ctx, W, 'SEC fair-value requirements · Federal Reserve FEDS note (Oct 2026) — valuation opacity and redemption incentives', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── feeStack — the BCRED fee layers ────────────────────────────────────────
@@ -2072,9 +2158,15 @@ export function feeStackScene(g: SceneCtx): void {
     //   about its own bottom edge (wide + short, the counter-bounce back);
     //   D-23 the settle — a decaying 2-arc wobble (±2.2px) after landing.
     const wu = windUp(feRaw);
-    const plateSq = impactSquash(t - plateLand);
+    // PROGRAM D-1: the plate's landing routes through the unified
+    // slamStrike grammar (mass 1.0 — the house slam) about its bottom edge.
+    const plateSq = slamStrike(t - plateLand, 1.0);
     const settle = landSettle(t - plateLand) * 2.2;
-    ctx.translate(18 * wu, settle - 5 * liftP); // A-3: the plate rises into the grip
+    // PROGRAM D-2 (THE ANTICIPATION LAW — PLATES LIFT BEFORE SLAMMING):
+    // during the coil the plate LIFTS 6px off the stack (the hand raising
+    // it for the deal), then it drops into its lane — the counter-move the
+    // law prescribes for every entry above 80px.
+    ctx.translate(18 * wu, settle - 5 * liftP - 6 * wu); // A-3: the plate rises into the grip
     if (plateSq !== 0) {
       ctx.translate(lx + lw / 2, y + 84);
       ctx.scale(1 + 0.026 * plateSq, 1 - 0.048 * plateSq);
@@ -2161,7 +2253,7 @@ export function feeStackScene(g: SceneCtx): void {
   });
   // U5: the auditor's line sweeps the fee stack
   ledgerScan(ctx, 344, H * 0.305, lw - 20, 5 * 92, t, 10.3);
-  sourceTag(ctx, W, 'BCRED published offering terms (Class S example) · recheck current terms before any allocation decision');
+  sourceTag(ctx, W, 'BCRED published offering terms (Class S example) · recheck current terms before any allocation decision', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── bullCase — the strongest honest bull case ──────────────────────────────
@@ -2212,9 +2304,14 @@ export function bullCaseScene(g: SceneCtx): void {
   // (740) and under the 2-row caption pill (the pill plated it on every
   // spoken frame — verified on harness frame 21-bullCase).
   const top = H * 0.32;
-  const e0 = easeOutCubic(clamp01((t - 350) / 600));
+  const rawE0 = clamp01((t - 350) / 600);
+  const e0 = easeOutCubic(rawE0);
   ctx.save();
   ctx.globalAlpha = e0;
+  // PROGRAM D-3: the audit card's geometry rides cardEnter.
+  ctx.translate(240 + (W - 820) / 2, top + (CAPTION_ZONE_TOP - 74 - top));
+  ctx.scale(0.965 + 0.035 * cardEnter(rawE0), 0.965 + 0.035 * cardEnter(rawE0));
+  ctx.translate(-(240 + (W - 820) / 2), -(top + (CAPTION_ZONE_TOP - 74 - top)));
   card(ctx, 240, top, W - 820, CAPTION_ZONE_TOP - 74 - top, { r: 34, glow: rgba(PALETTE.gold, 0.12) });
   ctx.restore();
   setFont(ctx, 56, 700, FONT_DISPLAY);
@@ -2283,7 +2380,7 @@ export function bullCaseScene(g: SceneCtx): void {
   });
   // U5: the auditor's line sweeps the argument panel
   ledgerScan(ctx, 244, top + 20, W - 820 - 20, CAPTION_ZONE_TOP - 74 - top - 40, t, 11.1);
-  sourceTag(ctx, W, side === 'cost' ? 'Source: Hamilton Lane 2026 overview — sample small and selected, comparison not like-for-like' : 'Analysis — suitability depends on the match between terms and obligations');
+  sourceTag(ctx, W, side === 'cost' ? 'Source: Hamilton Lane 2026 overview — sample small and selected, comparison not like-for-like' : 'Analysis — suitability depends on the match between terms and obligations', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── auditChecklist — the eight questions ───────────────────────────────────
@@ -2534,7 +2631,7 @@ export function auditChecklistScene(g: SceneCtx): void {
     const qxS = 180 + 330 + 70, qwS = W - qxS - 340;
     ledgerScan(ctx, qxS, H * 0.30, qwS, CAPTION_ZONE_TOP - 90 - H * 0.30, t, 13.9);
   }
-  sourceTag(ctx, W, 'The author\u2019s synthesis — components grounded in the SEC, Federal Reserve, fund-document and valuation sources in this film');
+  sourceTag(ctx, W, 'The author\u2019s synthesis — components grounded in the SEC, Federal Reserve, fund-document and valuation sources in this film', 1005, 0.55, { beatP: g.beatP });
 }
 
 // ── systemMap — liquidity as a system ──────────────────────────────────────

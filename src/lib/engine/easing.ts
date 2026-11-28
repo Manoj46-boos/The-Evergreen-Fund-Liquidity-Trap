@@ -47,10 +47,36 @@ export const easeOutQuart = (t: number): number => {
 };
 export const easeInOutQuart = (t: number): number =>
   t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
+// PROGRAM D-3 ROOT FIX: the shipped curve carried the WRONG SIGN on the
+// c3 term (1 + c3·(1−t)³ + …), so it started at 5.4 and decayed — a
+// settle-down curve wearing easeOutBack's name. Every call site's comment
+// describes the TRUE Penner curve ("the stamp drops from 1.55", "0.90 →
+// 1.0 with a 10% overshoot") — the sign bug made each of them behave
+// differently from its own documentation (mostly hidden behind the
+// alpha≈0 frames of the entrance, which is why the sweeps never caught
+// it). Fixed to the standard: f(t) = 1 + c3·(t−1)³ + c1·(t−1)².
 export const easeOutBack = (t: number): number => {
   const c1 = 1.70158;
   const c3 = c1 + 1;
-  const f = 1 - t;
+  const f = t - 1;
+  return 1 + c3 * f * f * f + c1 * f * f;
+};
+/**
+ * PROGRAM D-3 (100-JUDGE VISUAL AUDIT — FOLLOW-THROUGH AS THE DEFAULT
+ * ENTRANCE): the corrected easeOutBack overshoots ~8.8% (c1 = 1.70158) —
+ * too hot for cards that sit next to certified envelopes. `cardEnter` is
+ * the CALIBRATED follow-through entrance the report prescribes: the same
+ * back-out curve tuned to overshoot ~4% and settle, so a card lands with
+ * mass instead of stopping dead on easeOutCubic. This is the DEFAULT
+ * entrance ease for cards and props program-wide; easeOutCubic remains
+ * for alphas and pure fades (an opacity must never overshoot).
+ * c1 ≈ 1.0394 gives a measured 4.0% peak (the solved constant, peak at
+ * t ≈ 0.63). Pure f(t), exact 0/1 endpoints.
+ */
+export const cardEnter = (t: number): number => {
+  const c1 = 1.0394;
+  const c3 = c1 + 1;
+  const f = t - 1;
   return 1 + c3 * f * f * f + c1 * f * f;
 };
 export const easeOutElastic = (t: number): number => {
@@ -276,6 +302,34 @@ export function impactSquash(dt: number): number {
   if (dt < 0 || dt > 360) return 0;
   if (dt <= 130) return Math.sin((dt / 130) * Math.PI);
   return -0.32 * Math.sin(((dt - 130) / 230) * Math.PI);
+}
+
+/**
+ * PROGRAM D-1 (100-JUDGE VISUAL AUDIT — A slamStrike() GRAMMAR FOR ALL
+ * IMPACTS): "Generalize walkStrike into slamStrike(t0, mass): 6% vertical
+ * squash + 3% horizontal stretch over ~220ms with a 2-frame negative
+ * overshoot. Volume deformation on impact is the single clearest
+ * 'expensive animation' signal available in 2D."
+ *
+ * `slamStrike(dt, mass)` returns the impact factor k the caller applies as
+ *   scaleX = 1 + 0.03 · k    scaleY = 1 − 0.06 · k
+ * (volume-preserving: 1.03 × 0.94 ≈ 0.97 of rest at full k — mass arriving,
+ * not a balloon). `mass` (0.5 light paper … 1.0 the house slam … 1.2 the
+ * hero verdict) scales the amplitude, never the timing.
+ *   dt 0..110ms    the strike — sin ease to full k (the hand/prop lands)
+ *   dt 110..220ms  the settle — k decays to 0 (the ~220ms window)
+ *   dt 220..330ms  the 2-frame negative overshoot — the volume swings past
+ *                  rest the other way (−30%), then releases. Zero outside.
+ * Pure f(dt), scrub-safe, exact zeros at every boundary — pose/render
+ * continuity exact. The program's five named sites (stampCard, the %
+ * landing, navGap bars, caseFiles dossier flap, wrapperMatrix card
+ * arrivals) route through THIS grammar so every impact shares one law.
+ */
+export function slamStrike(dt: number, mass = 1): number {
+  if (dt < 0 || dt > 330) return 0;
+  if (dt <= 110) return mass * Math.sin((dt / 110) * Math.PI * 0.5);
+  if (dt <= 220) return mass * Math.cos(((dt - 110) / 110) * Math.PI * 0.5);
+  return -0.30 * mass * Math.sin(((dt - 220) / 110) * Math.PI);
 }
 
 /**

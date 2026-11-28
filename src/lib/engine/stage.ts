@@ -36,7 +36,7 @@
  */
 
 import { rgba, PALETTE, roundRect } from './theme';
-import { hash01 } from './easing';
+import { hash01, clamp01 } from './easing';
 import { frameContext, type FrameFamily } from './composition';
 
 /** per-family stage tuning: [horizonY, mullionCount, mullionAlpha, floorAlpha]
@@ -77,7 +77,12 @@ export function drawStageWorld(
   ctx: CanvasRenderingContext2D,
   W: number,
   H: number,
-  t: number
+  t: number,
+  /** PROGRAM D-4 (100-JUDGE VISUAL AUDIT — SECONDARY MOTION ON THE WORLD):
+   *  the host's walk phase 0..1 while a walk owns the frame (undefined
+   *  when standing) — the desk set pieces flutter 1-2px under his stride,
+   *  keyed to the SAME deterministic phase clock the walk consumes. */
+  walkPhase?: number
 ): void {
   const family = frameContext().family;
   const sceneType = frameContext().sceneType;
@@ -181,66 +186,78 @@ export function drawStageWorld(
   {
     const px = W * 0.085;
     const py = Math.min(H - H * 0.10, horizonY + H * 0.055); // on the floor, under the horizon
+    // PROGRAM D-4 (100-JUDGE VISUAL AUDIT — SECONDARY MOTION ON THE WORLD):
+    // a 1-2px flutter impulse on the desk papers and chart card as the host
+    // passes them — keyed to the WALK PHASE (each footfall shakes the
+    // stack), deterministic in walkPhase, zero when nobody walks (the set
+    // is still when the frame is still). Pure f(walkPhase).
+    const flutter = walkPhase !== undefined && walkPhase > 0 && walkPhase < 1
+      ? Math.sin(walkPhase * Math.PI * 10) * 1.8 * Math.sin(Math.PI * clamp01(walkPhase))
+      : 0;
+    const pyF = py + flutter;          // the whole piece rides the impulse
+    const sheetSkew = flutter * 0.35;  // the top sheet slides a hair more
     ctx.save();
     ctx.globalAlpha = 0.5;
     if (family === 'data') {
       // CHARTS-ON-DESK: the chart card, its rising line, two mini bars
       ctx.fillStyle = rgba(PALETTE.card, 0.9);
-      roundRect(ctx, px - 70, py - 26, 150, 104, 12);
+      roundRect(ctx, px - 70, pyF - 26, 150, 104, 12);
       ctx.fill();
       ctx.strokeStyle = rgba(PALETTE.gold, 0.55);
       ctx.lineWidth = 2.5;
-      roundRect(ctx, px - 70, py - 26, 150, 104, 12);
+      roundRect(ctx, px - 70, pyF - 26, 150, 104, 12);
       ctx.stroke();
       ctx.strokeStyle = rgba(PALETTE.up, 0.85);
       ctx.lineWidth = 5;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(px - 46, py + 52);
-      ctx.lineTo(px - 14, py + 30);
-      ctx.lineTo(px + 8, py + 40);
-      ctx.lineTo(px + 52, py + 2);
+      ctx.moveTo(px - 46, pyF + 52);
+      ctx.lineTo(px - 14, pyF + 30);
+      ctx.lineTo(px + 8, pyF + 40);
+      ctx.lineTo(px + 52, pyF + 2);
       ctx.stroke();
       ctx.fillStyle = rgba(PALETTE.gold, 0.75);
-      ctx.fillRect(px + 16, py + 54, 12, 22);
-      ctx.fillRect(px + 36, py + 44, 12, 32);
+      ctx.fillRect(px + 16, pyF + 54, 12, 22);
+      ctx.fillRect(px + 36, pyF + 44, 12, 32);
     } else if (family === 'host') {
       // THE DESK STACK: two ledger sheets + the brass pen cup
       ctx.fillStyle = rgba(PALETTE.card, 0.9);
-      roundRect(ctx, px - 66, py + 8, 132, 26, 8);
+      roundRect(ctx, px - 66, pyF + 8, 132, 26, 8);
       ctx.fill();
       ctx.fillStyle = rgba(PALETTE.card, 1);
-      roundRect(ctx, px - 58, py - 8, 116, 22, 7);
+      // the top sheet — the flutter's lead term (it rides the impulse and
+      // slides a hair along the desk: paper responding to the stride)
+      roundRect(ctx, px - 58 + sheetSkew, pyF - 8, 116, 22, 7);
       ctx.fill();
       ctx.strokeStyle = rgba(PALETTE.gold, 0.5);
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(px - 44, py - 1);
-      ctx.lineTo(px + 30, py - 1);
+      ctx.moveTo(px - 44 + sheetSkew, pyF - 1);
+      ctx.lineTo(px + 30 + sheetSkew, pyF - 1);
       ctx.stroke();
       ctx.fillStyle = rgba(PALETTE.goldDeep, 0.85);
-      roundRect(ctx, px + 64, py - 14, 34, 48, 9);
+      roundRect(ctx, px + 64, pyF - 14, 34, 48, 9);
       ctx.fill();
       ctx.strokeStyle = rgba(PALETTE.ink, 0.6);
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(px + 74, py - 12);
-      ctx.lineTo(px + 74, py - 34);
-      ctx.moveTo(px + 86, py - 12);
-      ctx.lineTo(px + 90, py - 30);
+      ctx.moveTo(px + 74, pyF - 12);
+      ctx.lineTo(px + 74, pyF - 34);
+      ctx.moveTo(px + 86, pyF - 12);
+      ctx.lineTo(px + 90, pyF - 30);
       ctx.stroke();
     } else {
       // THE LEDGER FOLIO: the statement's slim receipt book
       ctx.fillStyle = rgba(PALETTE.card, 0.9);
-      roundRect(ctx, px - 54, py - 4, 108, 42, 9);
+      roundRect(ctx, px - 54, pyF - 4, 108, 42, 9);
       ctx.fill();
       ctx.strokeStyle = rgba(PALETTE.gold, 0.5);
       ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.moveTo(px - 36, py + 10);
-      ctx.lineTo(px + 34, py + 10);
-      ctx.moveTo(px - 36, py + 22);
-      ctx.lineTo(px + 18, py + 22);
+      ctx.moveTo(px - 36, pyF + 10);
+      ctx.lineTo(px + 34, pyF + 10);
+      ctx.moveTo(px - 36, pyF + 22);
+      ctx.lineTo(px + 18, pyF + 22);
       ctx.stroke();
     }
     ctx.restore();

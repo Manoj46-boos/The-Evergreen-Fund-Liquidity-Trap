@@ -189,6 +189,39 @@ SCRIPT.forEach((chapter, ci) => {
       cur = moves.length ? moves[moves.length - 1].idx : startIdx;
       staticMs = moves.length ? est - moves[moves.length - 1].at : est;
     }
+    // ── PROGRAM C-4 (100-JUDGE VISUAL AUDIT — KEYED IDLE BEHAVIORS): ──────
+    // "statement beats step back one block at the 55% seam (stageMoves
+    // already schedules walks — add a step-back move)." For sentences that
+    // (a) carry no scheduled walk near the seam, (b) are long enough for
+    // both sides of the step to respect MIN_SEG, and (c) pass the hash
+    // gate (~40% — the idle vocabulary stays a vocabulary, not a tic), a
+    // STEP-BACK lands at 55% of the sentence: ONE block toward the stage's
+    // own edge (a short, weight-shift walk — not a cross-stage move), the
+    // presenter's "let me look at what I just said". restIdx follows the
+    // last move, so the NEXT boundary plans from where he landed.
+    {
+      const stepAt = Math.round(est * 0.55);
+      const lastAt = moves.length ? moves[moves.length - 1].at : -Infinity;
+      const lastIdx = moves.length ? moves[moves.length - 1].idx : startIdx;
+      const clearBefore = stepAt - (moves.length ? lastAt : 0) >= MIN_SEG_MS;
+      const clearAfter = est - stepAt >= MIN_SEG_MS;
+      const gated = hashStr(id + ':stepback') < 0.4;
+      if (gated && clearBefore && clearAfter && !moves.some((m) => Math.abs(m.at - stepAt) < MIN_SEG_MS)) {
+        // ONE block toward the stage-DEEP (right) edge — the step-back
+        // read. Rightward only: the editorial kicker band owns the LEFT
+        // top (colL 0.14-0.16W + a measured chip up to ~46 chars), and a
+        // leftward block can park the head dome under it (the sweep
+        // convicted exactly that compound at c1-semi). The rightward
+        // blocks sit inside the certified dome-clear zone, so the
+        // step-back is safe by construction.
+        const backIdx = lastIdx + 1;
+        if (backIdx <= BLOCK_COUNT - 1) {
+          moves = [...moves, { at: stepAt, from: lastIdx, idx: backIdx }];
+          cur = backIdx;
+          staticMs = est - stepAt;
+        }
+      }
+    }
     const restIdx = moves.length ? moves[moves.length - 1].idx : startIdx;
     plan.set(id, { startIdx, restIdx, moves });
   });

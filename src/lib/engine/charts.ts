@@ -1537,9 +1537,23 @@ export function sourceTag(
   W: number,
   source: string | undefined,
   y: number = 1005,
-  alpha = 0.55
+  alpha = 0.55,
+  /** PROGRAM E-3 (100-JUDGE VISUAL AUDIT — FEED-GATE FLOORS): "Move source
+   *  citations into a 1px chip row that only appears in the final 10% of a
+   *  beat, where a pause-reader can catch it." When beatP is provided the
+   *  citation renders ONLY in the beat's final 10% (a 4% fade-in) — the
+   *  numbers own the frame until the pause window opens. Undefined = the
+   *  legacy always-on behavior (non-beat callers). */
+  opts?: { beatP?: number }
 ): void {
   if (!source) return;
+  // PROGRAM E-3: the final-10% gate — 0 outside [0.90, 1], a sine ramp in
+  // over the last 4%. Deterministic in beatP; scrub-safe.
+  let gateA = 1;
+  if (opts?.beatP !== undefined) {
+    if (opts.beatP < 0.90) return;
+    gateA = opts.beatP >= 0.94 ? 1 : Math.sin(((opts.beatP - 0.90) / 0.04) * Math.PI * 0.5);
+  }
   ctx.save();
   // PANEL-10 (guard v2, 55 sweep violations): the tag was drawn INSIDE the
   // scene's camera space, right-anchored at x=1810 — under the chartJourney
@@ -1586,9 +1600,17 @@ export function sourceTag(
   } else {
     txt = (prefix ? prefix + '  ' : '') + body;
   }
-  // the whisper glass plate — the citation sits ON a designed surface, not
-  // naked on the room (the same navy glass the chips use, quieter)
-  ctx.fillStyle = 'rgba(7, 14, 30, 0.5)';
+  // the citation CHIP ROW (PROGRAM E-3): the designed D-29 plate becomes a
+  // SLIM 1px-hairline chip row — the trust mark + the citation at the same
+  // readable band, but the glass plate's heavy fill is gone: the row reads
+  // as a footnote chip (a 1px brass outline on the room), present only in
+  // the pause window where a pause-reader catches it.
+  ctx.globalAlpha *= gateA;
+  ctx.strokeStyle = rgba(PALETTE.gold, 0.62);
+  ctx.lineWidth = 1;
+  roundRect(ctx, plateX - 18, citeY - 34, tw + 96, 46, 23);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(7, 14, 30, 0.32)';
   roundRect(ctx, plateX - 18, citeY - 34, tw + 96, 46, 23);
   ctx.fill();
   // the brass source glyph — a 10px gold dot + hairline rule, the citation's

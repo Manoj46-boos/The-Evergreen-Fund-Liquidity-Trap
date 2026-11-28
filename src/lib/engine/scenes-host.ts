@@ -421,6 +421,16 @@ function drawHost(g: SceneCtx, side: 'center' | 'left' | 'right'): void {
       words: g.wordTexts,
       pointBias: bias,
       glanceBias: side === 'left' ? 0.9 : side === 'right' ? -0.9 : 0,
+      // PROGRAM C-1: the expression-keyed gesture pool — urgency draws
+      // shock/wry, reveals aha, calm close/leanIn, on the editorial host.
+      // The editorial staging ALWAYS carries the top kicker band (the
+      // D-28 ident/mode line registers above the head zone), so the shock
+      // recoil — the widest pose in the library — is excluded HERE; its
+      // lean walks the head dome into the chip. Urgency still draws wry;
+      // the reaction windows blend shock through take(), not the pool.
+      expression: beatExpressionOf(g.beat),
+      exclude: ['shock'],
+      rigScale: scale,
     });
     const expr = { ...expressionPose(beatExpressionOf(g.beat)), ...expressionBodyOf(beatExpressionOf(g.beat)) };
     pose = { ...pose, ...expr };
@@ -814,7 +824,23 @@ export function hostSceneV2(g: SceneCtx): void {
     // continuity is exact: each walk starts from the block the previous
     // segment actually RESTED on — no teleports.
     const st = g.sentenceT ?? 1e9;
-    const moves = stageMoves(g.sentenceId);
+    // PROGRAM C-4 guard coordination: a step-back whose target block parks
+    // the head dome under the staged kicker band never fires — the walk is
+    // skipped for that sentence (the host HOLDS his block; the behavior
+    // returns on a later sentence whose seam is clear). The dome's left
+    // edge rides cx − 26·HOST_SCALE (the hostBodyDome registration), so
+    // the safe target keeps cx ≥ kickerRight + dome + pad. Measured with
+    // the kicker draw's own font math — one law, one measurement.
+    const _kickHeadSrc = (((g.s.headline as string) ?? '').split('\n')[0] ?? '').trim();
+    const _kick = (g.s.kicker as string)
+      ?? (_kickHeadSrc ? _kickHeadSrc.toUpperCase().slice(0, 46) : 'THE DATA DESK · THE EVERGREEN FUND');
+    const _kickColL = (g.s.stage === 'kflip' || g.s.stage === 'kclimb' || g.s.stage === 'kdescend')
+      ? W * 0.16
+      : W * 0.14;
+    setFont(ctx, 34, 600);
+    const _kickRight = _kickColL + ctx.measureText(_kick).width + 48;
+    const _domeSafeX = _kickRight + 26 * HOST_SCALE + 6;
+    const moves = stageMoves(g.sentenceId).filter((m) => blockX(m.idx) >= _domeSafeX);
     let active: (typeof moves)[number] | null = null;
     for (const m of moves) if (st >= m.at) active = m;
     const startIdx = stageStartIdx(g.sentenceId);
@@ -1078,7 +1104,7 @@ export function hostSceneV2(g: SceneCtx): void {
   // back to look at his own chart. Holds feel supervised by a machine."
   // THE BEHAVIOR CLOCK: every 4.2s of scene time (from sceneT 2.4s — after
   // the entrance walk settles) the host performs ONE behavior in a 1.7s
-  // window, cycling three states keyed to the desk props the stage now
+  // window, cycling FOUR states keyed to the desk props the stage now
   // carries (the ledger book + pen cup at the exhibit's foot):
   //   0 THE LEDGER CHECK — head and eyes drop to the desk ledger, brows
   //     ease down (he reads his own numbers), torso tips a beat forward.
@@ -1086,6 +1112,10 @@ export function hostSceneV2(g: SceneCtx): void {
   //     twice (a 2-strike rhythm on the forearm), the head holds the room.
   //   2 THE STEP-BACK LOOK — weight rocks back onto the heels (lean + a
   //     2px rise), the head turns UP into his own headline/exhibit band.
+  //   3 THE STACK STRAIGHTEN (PROGRAM C-4 — the host family's own keyed
+  //     behavior): the near arm reaches the desk stack and squares it —
+  //     two short pushes on the forearm (the sheets nudged square), the
+  //     head tips down-left toward the props while he works.
   // All pose-level terms with a sine ramp in/out (zero at both window
   // edges — pose continuity exact), skipped while ANY walk window owns the
   // figure. Deterministic f(sceneT); scrub-safe.
@@ -1094,7 +1124,7 @@ export function hostSceneV2(g: SceneCtx): void {
     ? (() => {
         const wt = behaveSt % 4200;
         if (wt >= 1700) return null;
-        return { idx: Math.floor(behaveSt / 4200) % 3, wt, ramp: Math.sin((wt / 1700) * Math.PI) };
+        return { idx: Math.floor(behaveSt / 4200) % 4, wt, ramp: Math.sin((wt / 1700) * Math.PI) };
       })()
     : null;
   let behaveLook = 0.8;
@@ -1119,7 +1149,7 @@ export function hostSceneV2(g: SceneCtx): void {
         lAL: lerp(pose.lAL ?? 0, -58, 0.5 * ramp) + 6 * tap * ramp,
         browRaise: Math.max(0, (pose.browRaise ?? 0) - 0.06 * ramp),
       };
-    } else {
+    } else if (idx === 2) {
       // THE STEP-BACK LOOK — weight back, head up into his own content
       pose = {
         ...pose,
@@ -1129,6 +1159,20 @@ export function hostSceneV2(g: SceneCtx): void {
         browRaise: (pose.browRaise ?? 0) + 0.12 * ramp,
       };
       behaveLook = 0.8 + 0.25 * ramp;
+    } else {
+      // PROGRAM C-4 — THE STACK STRAIGHTEN: the near arm drops to the desk
+      // stack and squares it — two short pushes on the forearm (the sheets
+      // nudged square), head down-left toward the props while he works.
+      const push = wt < 1100 ? Math.abs(Math.sin((wt / 260) * Math.PI)) : 0;
+      pose = {
+        ...pose,
+        rAU: lerp(pose.rAU ?? 0, -30, 0.55 * ramp),
+        rAL: lerp(pose.rAL ?? 0, -64, 0.55 * ramp) + 7 * push * ramp,
+        headTilt: (pose.headTilt ?? 0) + 5 * ramp,
+        browRaise: Math.max(0, (pose.browRaise ?? 0) - 0.10 * ramp),
+        lean: (pose.lean ?? 0) + 2 * ramp,
+      };
+      behaveLook = 0.8 - 0.45 * ramp;
     }
   }
   // ── 100-JUDGE VISUAL AUDIT (defect D-25 — THE EDITORIAL HOST WALKS OUT) ──
@@ -1810,14 +1854,20 @@ export function splitNumbersScene(g: SceneCtx): void {
     // meaningless"): the band now carries its OWN labels — each half is
     // NAMED at its end, so 500 anonymous dots become a labeled population
     // read: two halves of one country, one band, one economy.
-    {
-      // P7 (THE 50% SEAM SECOND ARRIVAL): the 500-household band is the
-      // scene's demoted element — on long holds it reveals at the seam
-      // (~50% of the group), so the second half of the staging carries a
-      // real content event. Short groups keep the certified 600ms.
-      const bp = clamp01(
-        (t - seamArrival(String((g.s as Record<string, any>)?.title ?? 'splitNumbers'), g.d, 600)) / 700
-      );
+    // PROGRAM E-6 (DENSITY BANDS 25-60% — SHED A LAYER INTO A SECOND BEAT):
+    // the band is the run's DEMOTED layer — on the sceneKey run's FIRST
+    // beat (runIdx 0) the panels + host carry the frame alone; the band
+    // SHEDS into the run's second beat (runIdx >= 1), where it reveals at
+    // the seam as that beat's own content event. One layer per beat, both
+    // beats inside the 25-60% band.
+    if ((g.runIdx ?? 0) >= 1) {
+    // P7 (THE 50% SEAM SECOND ARRIVAL): the 500-household band is the
+    // scene's demoted element — on long holds it reveals at the seam
+    // (~50% of the group), so the second half of the staging carries a
+    // real content event. Short groups keep the certified 600ms.
+    const bp = clamp01(
+      (t - seamArrival(String((g.s as Record<string, any>)?.title ?? 'splitNumbers'), g.d, 600)) / 700
+    );
       if (bp > 0) {
         ctx.save();
         ctx.globalAlpha = bp;

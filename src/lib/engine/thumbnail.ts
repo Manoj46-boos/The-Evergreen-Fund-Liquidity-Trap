@@ -65,7 +65,28 @@ export interface ThumbVariant {
   punch: string[];
   /** plated number badge */
   badge: { big: string; label: string };
+  /** PROGRAM F-1 — the TEST FAMILY this variant belongs to: A = face
+   *  close-up (a curiosity image: shock + the %), B = object-only poster
+   *  (a statement image: brass disc, slice, strike-through), C = the full
+   *  scene. Two variants per family — a Test and Compare measures the
+   *  FAMILY the audience clicks, not copy. */
+  family?: 'A' | 'B' | 'C';
+  /** what this variant varies WITHIN its family (the axis the race reads) */
+  axis?: string;
 }
+
+/** PROGRAM F-1 — THE FAMILY MAP: the Test & Compare's six slots regrouped
+ *  as three families × two variants. The channel finally learns WHAT its
+ *  audience clicks (a face, an object, or a scene), then WHICH version of
+ *  that family. */
+export const THUMB_FAMILIES: Array<{ variant: 0 | 1 | 2 | 3 | 4 | 5; family: 'A' | 'B' | 'C'; axis: string }> = [
+  { variant: 1, family: 'A', axis: 'face 24%H, eyes to the slice' },
+  { variant: 5, family: 'A', axis: 'face 30%H, eyes to camera, slice held up' },
+  { variant: 2, family: 'B', axis: 'two-plate statement ($1M → $50K)' },
+  { variant: 3, family: 'B', axis: 'object glyph (the question mark)' },
+  { variant: 0, family: 'C', axis: 'the pull — host + disc + rope' },
+  { variant: 4, family: 'C', axis: 'the queue — five figures at the window' },
+];
 
 // ── 100-JUDGE PANEL / PHASE 3 item 3.5 — THE THUMBNAIL GUARD ───────────────
 // (kept from v3: every text shrinks until its MEASURED width fits its plate
@@ -91,16 +112,16 @@ export function fitCheck(
   return size;
 }
 
-/** The six v4 variants — six COMPOSITIONS, one per hook class.
+/** The six v4 variants — three FAMILIES × two variants (PROGRAM F-1).
  *  The punch/badge copy keeps the set's proven wordings; the LAYOUT is what
- *  now varies (see drawThumbnail's composition switch). */
+ *  varies (see drawThumbnail's composition switch). */
 export const THUMB_VARIANTS: ThumbVariant[] = [
-  { punch: ['5% ≠', 'YOUR EXIT'], badge: { big: '5%', label: 'OF THE FUND' } },
-  { punch: ['THE 5%', 'TRAP'], badge: { big: '5%', label: 'OF THE FUND' } },
-  { punch: ['YOUR EXIT', 'IS 5%?'], badge: { big: '$1M →', label: '$50K EXIT' } },
-  { punch: ['SEMI-LIQUID', 'LIE?'], badge: { big: '84%', label: 'WANT MORE' } },
-  { punch: ['WHERE’S MY', 'MONEY?'], badge: { big: '10%', label: 'REQUESTED' } },
-  { punch: ['THE QUEUE', 'IS THE RISK'], badge: { big: '5%', label: 'PAID OUT' } },
+  { punch: ['5% ≠', 'YOUR EXIT'], badge: { big: '5%', label: 'OF THE FUND' }, family: 'C', axis: 'the pull — host + disc + rope' },
+  { punch: ['THE 5%', 'TRAP'], badge: { big: '5%', label: 'OF THE FUND' }, family: 'A', axis: 'face 24%H, eyes to the slice' },
+  { punch: ['YOUR EXIT', 'IS 5%?'], badge: { big: '$1M →', label: '$50K EXIT' }, family: 'B', axis: 'two-plate statement' },
+  { punch: ['SEMI-LIQUID', 'LIE?'], badge: { big: '84%', label: 'WANT MORE' }, family: 'B', axis: 'object glyph (question mark)' },
+  { punch: ['WHERE’S MY', 'MONEY?'], badge: { big: '10%', label: 'REQUESTED' }, family: 'C', axis: 'the queue — small faces, big object' },
+  { punch: ['THE QUEUE', 'IS THE RISK'], badge: { big: '5%', label: 'PAID OUT' }, family: 'A', axis: 'face 30%H, eyes to camera, slice held up' },
 ];
 
 // ── shared canvas prep: the vault canvas + one brass glow pool ─────────────
@@ -481,67 +502,50 @@ export function drawThumbnail(
     punchBlock(ctx, W, H, v.punch, Math.round(W * 0.045), H * 0.30, W * 0.5);
     badgeBlock(ctx, W, H, v.badge, 36, H - 205 - 42);
   }
-  // ── v5 — THE TRAP: the giant dart pinning the slice ─────────────────────
+  // ── v5 — FAMILY A #2: THE DIRECT-TO-CAMERA FACE CLOSE-UP ────────────────
+  // PROGRAM F-1 (THREE FAMILIES, NOT SIX CLONES): the second Family A slot
+  // — a BIGGER face (30% of H vs v1's 24%), eyes locked TO CAMERA, the 5%
+  // slice held UP beside the face (the shock + the % — a curiosity image).
+  // The axis this variant tests: face scale + eye line. (The old dart-trap
+  // composition retired into the family race — its statement job is Family
+  // B's #2, the question-mark glyph.)
   else {
-    vaultCanvas(ctx, W, H, 0.44, 0.5);
-    const cx = W * 0.42, cy = H * 0.54, R = H * 0.26;
-    brassDisc(ctx, cx, cy, R);
-    // the slice — OUT of the disc, at the dart's tip
-    const sx = W * 0.545, sy = H * 0.50;
-    // THE DART — giant, brass, diagonal from the top-right corner into the
-    // slice (the object scale this variant tests: the dart is a THIRD of
-    // the frame)
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(-0.62);
-    // shaft
-    const shaft = ctx.createLinearGradient(0, 0, W * 0.62, 0);
-    shaft.addColorStop(0, '#7A5A18');
-    shaft.addColorStop(0.5, BRASS);
-    shaft.addColorStop(1, '#FFEDB8');
-    ctx.fillStyle = shaft;
-    roundRect(ctx, 0, -H * 0.019, W * 0.62, H * 0.038, H * 0.019);
-    ctx.fill();
-    // the flight (fletching) — three porcelain vanes
-    ctx.fillStyle = '#EAF2FF';
-    for (const vy of [-1, 0, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(W * 0.50, vy * H * 0.012);
-      ctx.lineTo(W * 0.60, vy * H * 0.055 - H * 0.01);
-      ctx.lineTo(W * 0.635, vy * H * 0.055);
-      ctx.lineTo(W * 0.52, vy * H * 0.012 + H * 0.014);
-      ctx.closePath();
-      ctx.fill();
-    }
-    // the tip — dark steel into the slice
-    ctx.fillStyle = '#1A2438';
+    vaultCanvas(ctx, W, H, 0.24, 0.38);
+    // the held slice — UP beside the face, the curiosity object at hand
+    const sliceX = W * 0.735, sliceY = H * 0.325;
+    iceSlice(ctx, sliceX, sliceY, H * 0.075, -0.4);
+    // its glow — the promise carries light
+    const sgl = ctx.createRadialGradient(sliceX, sliceY, 4, sliceX, sliceY, H * 0.16);
+    sgl.addColorStop(0, 'rgba(65, 216, 239, 0.38)');
+    sgl.addColorStop(1, 'rgba(65, 216, 239, 0)');
+    ctx.fillStyle = sgl;
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-H * 0.055, -H * 0.020);
-    ctx.lineTo(-H * 0.055, H * 0.020);
-    ctx.closePath();
+    ctx.arc(sliceX, sliceY, H * 0.16, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
-    // the pinned slice (under the dart tip) — the slice is the payload the
-    // dart pinned: it reads at the feed, not a sliver
-    iceSlice(ctx, sx, sy, R * 0.46, -0.5);
-    // impact star at the pin point
-    ctx.strokeStyle = 'rgba(234, 242, 255, 0.85)';
-    ctx.lineWidth = 6;
-    for (let a = 0; a < 6; a++) {
-      const ang = a * Math.PI / 3 + 0.3;
-      ctx.beginPath();
-      ctx.moveTo(sx + Math.cos(ang) * R * 0.36, sy + Math.sin(ang) * R * 0.36);
-      ctx.lineTo(sx + Math.cos(ang) * R * 0.5, sy + Math.sin(ang) * R * 0.5);
-      ctx.stroke();
+    // THE FACE — bigger than v1's, eyes TO CAMERA (look 0: the viewer is
+    // addressed; the promise is made to YOU), shock brows (the POSES.shock
+    // register the film ships), arms tucked under the punch block
+    {
+      const SC = (H * 0.30) / 24;
+      const fx = W * 0.27;
+      const fy = H * 0.40 + 225 * SC; // pelvis far below the frame — head centered
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.scale(SC, SC);
+      drawHost(ctx, 0, 0, 1, 3600, {
+        pose: { ...POSES.shock, lAU: -10, lAL: -8, rAU: 8, rAL: 10 },
+        faceScale: 1.0,
+        look: 0, parallax: false,
+      }, 7);
+      ctx.restore();
     }
-    punchBlock(ctx, W, H, v.punch, Math.round(W * 0.045), H * 0.19, W * 0.34, 120);
+    punchBlock(ctx, W, H, v.punch, Math.round(W * 0.05), H * 0.63, W * 0.62);
     badgeBlock(ctx, W, H, v.badge, 36, H - 205 - 42, 'right');
   }
 
   // ── THE BRAND TAG — the brass %, top-left ──
-  // (v2 keeps the top band for the punch; v5's punch owns the same band —
-  // the tag drops on those compositions)
+  // (v2 keeps its top band for the punch; v5's face close-up owns the same
+  // corner — the tag drops on those compositions)
   if (variant !== 2 && variant !== 5) {
     ctx.save();
     drawPct(ctx, 116, 132, 46, 12, BRASS, 1);
@@ -560,4 +564,92 @@ export function drawThumbnailVariant(
   variant: 0 | 1 | 2 | 3 | 4 | 5 = 0
 ): void {
   drawThumbnail(ctx, W, H, variant);
+}
+
+/**
+ * PROGRAM F-2 (100-JUDGE VISUAL AUDIT — AN END SCREEN THAT SELLS THE
+ * SESSION): the next-video card carries a 3-SECOND ANIMATED LOOP of that
+ * video's hook frame — the Family C pull composition (disc + rope-pulled
+ * slice + the % mark) running on a 3s loop, scrub-safe f(t). "(thumbnail.ts
+ * can render it)" — the end screen's click target now MOVES like the
+ * packaging does, and the loop teases the film's own question. Pure f(t)
+ * on the 3000ms loop clock; drawn into any rect (the end screen calls it
+ * into the teaser card's panel).
+ */
+export function drawNextVideoHook(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  t: number
+): void {
+  const { goldDisplay: BRASS, upVivid: ICE } = PALETTE;
+  ctx.save();
+  ctx.beginPath();
+  roundRect(ctx, x, y, w, h, 20);
+  ctx.clip();
+  // the vault field — the poster canvas at card scale
+  const bg = ctx.createLinearGradient(x, y, x, y + h);
+  bg.addColorStop(0, '#0B1730');
+  bg.addColorStop(0.7, '#12244A');
+  bg.addColorStop(1, '#0A1526');
+  ctx.fillStyle = bg;
+  ctx.fillRect(x, y, w, h);
+  const pool = ctx.createRadialGradient(x + w * 0.42, y + h * 0.52, 8, x + w * 0.42, y + h * 0.52, w * 0.6);
+  pool.addColorStop(0, 'rgba(240, 199, 94, 0.20)');
+  pool.addColorStop(1, 'rgba(240, 199, 94, 0)');
+  ctx.fillStyle = pool;
+  ctx.fillRect(x, y, w, h);
+  // the loop clock — 3s: pull 0..0.55, hold 0.55..0.8, release 0.8..1
+  const cyc = (t % 3000) / 3000;
+  const pullE = cyc < 0.55 ? easeInOutSineLocal(cyc / 0.55) : cyc < 0.8 ? 1 : 1 - easeInOutSineLocal((cyc - 0.8) / 0.2);
+  // the disc
+  const cx = x + w * 0.40, cy = y + h * 0.54, R = h * 0.30;
+  ctx.fillStyle = 'rgba(1, 4, 12, 0.55)';
+  ctx.beginPath();
+  ctx.arc(cx - 4, cy + 6, R, 0, Math.PI * 2);
+  ctx.fill();
+  const face = ctx.createRadialGradient(cx - R * 0.35, cy - R * 0.4, R * 0.1, cx, cy, R * 1.15);
+  face.addColorStop(0, '#FFEDB8');
+  face.addColorStop(0.55, BRASS);
+  face.addColorStop(1, '#7A5A18');
+  ctx.fillStyle = face;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(122, 90, 24, 0.6)';
+  ctx.lineWidth = Math.max(2, R * 0.05);
+  ctx.beginPath();
+  ctx.arc(cx, cy, R * 0.78, 0, Math.PI * 2);
+  ctx.stroke();
+  // the 5% wedge — pulled out along the rail on the loop clock
+  const a0 = -Math.PI * 0.14, a1 = Math.PI * 0.06;
+  const pullDist = R * (0.18 + 1.5 * pullE);
+  const sx = cx + Math.cos((a0 + a1) / 2) * pullDist;
+  const sy = cy + Math.sin((a0 + a1) / 2) * pullDist;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate((a0 + a1) / 2);
+  ctx.fillStyle = ICE;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.arc(0, 0, R * 0.92, a0, a1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(1, 4, 12, 0.5)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.restore();
+  // the slice's glow — brightens with the pull
+  const sg = ctx.createRadialGradient(sx, sy, 2, sx, sy, R * 0.7);
+  sg.addColorStop(0, `rgba(65, 216, 239, ${0.2 + 0.3 * pullE})`);
+  sg.addColorStop(1, 'rgba(65, 216, 239, 0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath();
+  ctx.arc(sx, sy, R * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** local ease (kept private — the public one lives in easing.ts) */
+function easeInOutSineLocal(t: number): number {
+  return -(Math.cos(Math.PI * Math.min(1, Math.max(0, t))) - 1) / 2;
 }

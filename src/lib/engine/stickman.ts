@@ -361,6 +361,19 @@ export class Stickman {
      *  at every rig the film actually stages (the 80ms coil at rig 1.17
      *  moves an arm ≥ 12px on screen). */
     rigScale?: number;
+    /** PROGRAM C-1 (WIRE EXPRESSION TO THE SCRIPT): the beat's expression
+     *  key (beatExpressionOf). The sentence-gesture pool is chosen BY IT —
+     *  urgency draws from shock/wry, reveals from aha, calm from
+     *  close/leanIn — so the rig's expressive poses are reachable from
+     *  every speaking call site instead of one hard-coded talkA/pointR/
+     *  present/count2 list. Omitted = the neutral list. Deterministic:
+     *  the pool still picks by the sentence-id hash. */
+    expression?: string;
+    /** PROGRAM C-1 guard coordination: pose keys the caller's staging
+     *  cannot afford this frame (e.g. 'shock' — the widest recoil — under
+     *  a registered kicker band). The pool filters them before the hash;
+     *  the expression keeps its other registers. */
+    exclude?: string[];
   }): Pose {
     const seed = opts.seed ?? 0;
     const gesture = opts.gesture || 'idle';
@@ -396,11 +409,34 @@ export class Stickman {
         // a vocabulary list: every sentence picks a distinct HAND, not
         // just a distinct arm angle — "hands stop being mitts in every
         // non-hero frame".
-        const list = opts.pointBias === 'right'
-          ? ['talkA', 'pointR', 'present', 'count2', 'pointR', 'talkB', 'count1']
+        // PROGRAM C-1 — THE EXPRESSION-KEYED POOLS: the pool the sentence
+        // hash picks from now DEPENDS on the beat's expression key (the
+        // voStyle the whole film already inherits — scene-context.ts).
+        // Every pool keeps the presentation vocabulary (present/point/
+        // count) so the host still TALKS TOWARD his data; the expressive
+        // poses rotate through the slots the emotion owns. pointBias still
+        // doubles the directional point inside whichever pool is active.
+        const biasPool = (pool: string[]): string[] =>
+          opts.pointBias === 'right'
+            ? [pool[0], 'pointR', pool[1], pool[2], 'pointR', pool[3], pool[4] ?? 'present']
+            : opts.pointBias === 'left'
+              ? [pool[0], 'pointL', pool[1], pool[2], 'pointL', pool[3], pool[4] ?? 'present']
+              : pool;
+        // the caller's staging exclusions (the shock recoil is the widest
+        // pose in the library — under a registered kicker band the lean
+        // walks the head dome into the chip; the other registers hold)
+        const rawPool = biasPool(
+          opts.expression === 'urgent' ? ['shock', 'talkA', 'wry', 'present', 'count2']
+          : opts.expression === 'reveal' ? ['aha', 'present', 'talkC', 'pointR', 'count3']
+          : opts.expression === 'quote' ? ['warm', 'close', 'present', 'talkA', 'leanIn']
+          : opts.expression === 'calm' ? ['close', 'leanIn', 'present', 'talkB', 'pointR']
+          : opts.pointBias === 'right'
+            ? ['talkA', 'pointR', 'present', 'count2', 'pointR', 'talkB', 'count1']
           : opts.pointBias === 'left'
             ? ['talkB', 'pointL', 'present', 'count2', 'pointL', 'talkA', 'count1']
-            : ['talkA', 'talkB', 'present', 'count2', 'pointR', 'count3', 'talkC'];
+          : ['talkA', 'talkB', 'present', 'count2', 'pointR', 'count3', 'talkC']
+        );
+        const list = opts.exclude?.length ? rawPool.filter((k) => !opts.exclude!.includes(k)) : rawPool;
         const pick = (id: string): Pose =>
           POSES[list[Math.min(list.length - 1, Math.floor(hashStr(id) * list.length))]];
         const cyc = pick(opts.sentenceId);
@@ -669,7 +705,24 @@ export class Stickman {
           // take by HERO.headLeadDeg — the head-lead take the audit lists
           // as one of the three body-action hero events.
           headYaw: (pose.headYaw ?? 0) + accent * 3.5 + full * HERO.headLeadDeg,
+          // PROGRAM C-2 (100-JUDGE VISUAL AUDIT — MAKE THE FACE TALK WITH
+          // THE HANDS): the word-accent pulse routes into the BROW — +0.2
+          // on content words (the `full` tier-1 envelope, so connective
+          // tissue stays at the pose's own brow). The face articulates the
+          // narration instead of holding one smile under moving lips. Pure
+          // f(t, word data) — scrub-safe, zero when no accent is live.
+          browRaise: Math.min(1, (pose.browRaise ?? 0) + full * 0.2),
         };
+        // PROGRAM C-2 (the blink half): the rig's raised-cosine blink now
+        // also rides SENTENCE BOUNDARIES — a sentence that ends closes the
+        // eyes for its first ~260ms (sin π envelope, peak closure at 130ms).
+        // The face punctuates the narration's punctuation. The take()'s
+        // own blinkT stays authoritative when both fire (the max below).
+        const sbT = opts.sentenceT ?? -1;
+        if (sbT >= 0 && sbT < 260) {
+          const sb = Math.sin(Math.PI * clamp01(sbT / 260));
+          pose = { ...pose, blinkT: Math.max(pose.blinkT ?? 0, sb) };
+        }
       } else {
         // legacy fallback (no sentence data — e.g. the shorts cutter):
         // the PANEL-12 spring cycle among the three open poses
@@ -734,6 +787,22 @@ export class Stickman {
         };
         const target = state === 1 ? shifted : state === 2 ? glanced : state === 3 ? reanchored : settle;
         pose = blendPose(settle, target, easeS);
+        // PROGRAM C-3 (100-JUDGE VISUAL AUDIT — HEAD FOLLOW-THROUGH): the
+        // delayed-lean capture (leanDelayed) lags the torso's lean 105ms;
+        // the GLANCE YAW now runs on the same law. The glance window is
+        // keyed to the ABSOLUTE cycle clock with its own +105ms delay on
+        // entry and exit — the shoulders (the body blend above) turn
+        // first, the head arrives after them, and on the way out the head
+        // is still returning 105ms after the body has reset. The cheapest
+        // "trained animator" tell available, on every idle glance. Pure
+        // f(t) — scrub-safe.
+        const u = t % (4 * CYCLE);
+        const gIn = clamp01(springTo(0, 1, Math.max(0, u - (2 * CYCLE + 105)), 420, 12));
+        const gOut = clamp01(springTo(0, 1, Math.max(0, u - (3 * CYCLE + 105)), 420, 12));
+        const glanceK = gIn * (1 - gOut);
+        if (glanceK > 0.001) {
+          pose = { ...pose, headYaw: lerp(pose.headYaw ?? 0, glanceDir * (AMP.headYawDeg ?? 14) * 0.92, glanceK) };
+        }
       }
     } else {
       pose = POSES[gesture] ?? POSES.idle;

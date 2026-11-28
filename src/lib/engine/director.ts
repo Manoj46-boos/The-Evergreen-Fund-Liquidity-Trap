@@ -6,7 +6,7 @@
  */
 
 import { clamp01, easeInQuad, easeInOutSine, easeOutCubic } from './easing';
-import { PALETTE, paintBg, rgba, hexLerp as mixHex2, FONT_DISPLAY, FONT_UI, drawRoomRail, drawChapterRoom, getRoomFamily, setRoomFamily, setWashChapter } from './theme';
+import { PALETTE, paintBg, rgba, hexLerp as mixHex2, FONT_DISPLAY, FONT_UI, drawRoomRail, drawChapterRoom, getRoomFamily, setRoomFamily, setWashChapter, scenePlate } from './theme';
 import { drawGrain, lightVignette, bokehField, scalePunch, camState, guardCamState, irisWipe, fgBokeh, dofPass, chapterAccent, drawPct3D } from './effects';
 import { drawParticles, emitterKindFor } from './particles';
 import { drawCaptions, drawChapterCard, drawChapterLabel, drawProgressBar, drawWatermark } from './textfx';
@@ -357,7 +357,14 @@ function cameraV2(
    *  to the character walk-out — the camera-only lift/truck never walks
    *  a presenter off, and the character exit keyed to groupIdx parity
    *  sampled host groups only ~22% of the time. */
-  groupLeadType = 'host'
+  groupLeadType = 'host',
+  /** PROGRAM E-5 (100-JUDGE VISUAL AUDIT — BREAK THE LONG RUNS): the
+   *  focused wrapper index for wrapperMatrix groups — each wrapper gets
+   *  its own HERO TRUCK (the HERO_MOVES grammar): the camera trucks
+   *  toward the focused column, eased on the group clock, exactly zero
+   *  at both ends. Same amplitudes the guard certified for fundSplit's
+   *  truck (60px). */
+  wrapperFocus = -1
 ): void {
   const p = clamp01(gt / Math.max(1, groupDur));
   // scenes that present a single subject push in; comparison scenes pull out
@@ -516,6 +523,20 @@ function cameraV2(
       roll = 0.2 * (Math.PI / 180) * Math.sin(Math.PI * heroE);
     }
     else if (hero.move === 'rise') camY -= hero.amt * heroE;
+  }
+  // PROGRAM E-5 — THE PER-WRAPPER HERO TRUCK: wrapperMatrix's four-column
+  // row gets a HERO_MOVES-grade truck per focused wrapper — the camera
+  // eases toward the focused column over the group's body and holds, then
+  // releases FULLY by p 0.82 — the exit grammar owns the final band and
+  // the two cameras must never compound (the sweep convicted the compound:
+  // a 25px truck + the exit drift walked the left-rail host's feet band
+  // past the frame edge). Amplitude 44px (inside fundSplit's certified 60px
+  // corridor); the sign follows the focused column's side. Pure f(gt,
+  // focus).
+  if (sceneType === 'wrapperMatrix' && wrapperFocus >= 0) {
+    const wE = easeInOutSine(p);
+    const release = p > 0.70 ? 1 - easeInOutSine(clamp01((p - 0.70) / 0.12)) : 1;
+    camX += 44 * ((wrapperFocus - 1.5) / 1.5) * wE * release;
   }
   // AUDIT-ROUND-2 (fix 27 — SCENE-GROUP CAPS, the mid-scene REFRAME): any
   // group longer than 12 seconds holding ONE staging is a swipe risk
@@ -938,6 +959,17 @@ export function drawFrame(
     // their framing from it (caseFiles %3, auditChecklist %3,
     // wrapperMatrix %2) — no scene holds one layout for 9-15 beats again.
     runIdx: runIndexOf(tl, beat),
+    // PROGRAM D-4 (SECONDARY MOTION ON THE WORLD): the beat's walk phase
+    // 0..1, computed from the beat's OWN walk props (walkMs / walkAcross
+    // — the same clocks the scenes' walks consume). The bg() helpers
+    // route it into paintBg → drawStageWorld so the desk set pieces
+    // flutter under the stride. Undefined when the beat stages no walk.
+    walkPhase:
+      sceneProps.walkMs !== undefined && Number(sceneProps.walkMs) > 0
+        ? clamp01(gt / Number(sceneProps.walkMs))
+        : sceneProps.walkAcross !== undefined && sceneProps.walkAcross
+          ? clamp01(gt / 2200)
+          : undefined,
   };
 
   // scale context for non-1080p targets (design grid is 1920×1080)
@@ -956,7 +988,11 @@ export function drawFrame(
   const leadBeat = group ? tl.beats[group.beatIdx] : null;
   const groupLeadType = leadBeat ? String(leadBeat.beat.scene.type) : String(beat.beat.scene.type);
   cameraV2(ctx, W, H, gt, groupDur, beat.beat.scene.type, beat.chapter, groupIdx, beat.beat.scene.sceneKey,
-    groupIdx === allGroups.length - 1, groupLeadType);
+    groupIdx === allGroups.length - 1, groupLeadType,
+    // PROGRAM E-5: the focused wrapper index drives wrapperMatrix's hero truck
+    beat.beat.scene.type === 'wrapperMatrix'
+      ? Number(beat.beat.scene.focus ?? -1)
+      : -1);
   // 1-2% scale punch that decays over 160ms right after each hard cut
   // PANEL-12 / P2-3 (report §14.3): bigText and stampCard land the film's
   // loudest words — their punch amplifies 0.035 → 0.05 so the cut itself
@@ -979,6 +1015,17 @@ export function drawFrame(
   }
 
   const drawer = SCENES[beat.beat.scene.type] ?? hostScene;
+  // PROGRAM E-1 (100-JUDGE VISUAL AUDIT — ZERO DEAD FRAMES): paint the
+  // scene plate BEFORE the first drawer frame at every group boundary —
+  // the room is ON the frame at gt 0 even if the drawer's content is
+  // still at alpha 0 (the plate is background-grade; the drawer's own
+  // bg() overpaints it harmlessly). The film's first frame is the poster
+  // promise, never a bare canvas; the render sweep's frame-zero occupancy
+  // floor + emptiness probe enforce it from the harness side.
+  if (gt < 40) {
+    scenePlate(ctx, 1920, 1080, chapterTone ?? 'neutral', 0.9, undefined,
+      { furniture: beat.beat.scene.type !== 'bigText' && beat.beat.scene.type !== 'stampCard' });
+  }
   // BLUEPRINT Phase 4 (report §11): the TWO-FRAME CAMERA SMEAR on data
   // slams — a 45%-alpha re-draw of the scene offset 10px for the first
   // 66ms of every bigText / stampCard group: the visible two-frame

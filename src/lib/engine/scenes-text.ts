@@ -3,7 +3,7 @@
  * cards, takeaways, comment prompt, and the end screen.
  */
 
-import { clamp01, easeInOutSine, easeOutBack, easeOutCubic, easeOutQuad, impactSquash, landSettle } from './easing';
+import { clamp01, easeInOutSine, easeOutBack, easeOutCubic, easeOutQuad, impactSquash, landSettle, cardEnter, slamStrike } from './easing';
 import { PALETTE, TONE, card, rgba, roundRect, setFont, paintBg, scenePlate, chapterArch, glowBlob, FONT_DISPLAY, FONT_UI, CAPTION_ZONE_TOP, NUM } from './theme';
 import { bokehField, lightRays, softBloom, sparkles, drawK3D, drawPct, drawPct3D, kMotifs, floatCoins, impactRing, microShake, dustBurst, camState } from './effects';
 import { SceneCtx, declareOnScreenHeadline, reactionStart, beatExpressionOf } from './scene-context';
@@ -16,10 +16,10 @@ import { drawStickmanV2 } from './stickman-v2';
 import { wrapText } from './charts';
 import { registerRect, registerText, declareHostContact } from './collision';
 // D-32: the thumbnail's fit guard guards the end screen's one-line title too
-import { fitCheck } from './thumbnail';
+import { fitCheck, drawNextVideoHook } from './thumbnail';
 
 function bg(g: SceneCtx, seed: number, gold = 0.4, strength = 0.72, bokeh = 0.85, furniture = true): void {
-  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone);
+  paintBg(g.ctx, g.W, g.H, g.t, g.chapterTone, g.walkPhase);
   // P1-2 (report §12.2): statement scenes live in a room too — the plate
   // lands behind every text beat (stamp/quote/takeaways/comment), so a
   // full-bleed tint carries the frame instead of raw white.
@@ -239,7 +239,7 @@ export function bigTextScene(g: SceneCtx): void {
     // about the block's own baseline (stmtY0), the impact line. Pure
     // f(t); the scale envelope above is untouched (the squash rides on
     // top; continuity exact outside the 360ms window).
-    const slamSq = impactSquash(t - 340);
+    const slamSq = slamStrike(t - 340, 1.15); // PROGRAM D-1: the statement slam — the unified grammar, hero mass
     if (slamSq !== 0) {
       ctx.translate(COL_X + COL_W / 2, stmtY0);
       ctx.scale(1 + 0.07 * slamSq, 1 - 0.09 * slamSq);
@@ -488,7 +488,7 @@ export function stampCardScene(g: SceneCtx): void {
     // impact line the frame's rotation pivots on) and recovers through the
     // stretch counter-bounce. Pure f(t); continuity exact outside 360ms.
     {
-      const stampSq = impactSquash(t - 500); // ap completes at 500 — the paper-contact instant
+      const stampSq = slamStrike(t - 500, 1.2); // ap completes at 500 — the paper-contact instant. PROGRAM D-1: the stamp is the film's heaviest slam
       if (stampSq !== 0) ctx.scale(1 + 0.075 * stampSq, 1 - 0.095 * stampSq);
     }
     const txt = (s.stamp as string) || 'RECORD HIGHS';
@@ -905,6 +905,46 @@ export function quoteCardScene(g: SceneCtx): void {
   // mid-ground layer (20% alpha, gold, filling the vertical band). The
   // frame now carries designed content in every quadrant; the host reads
   // as presenting BESIDE the mark, not floating in a wash.
+  // PROGRAM E-6 (DENSITY BANDS 25-60%): bigText keeps its dotPayoff field —
+  // quoteCard now consumes the SAME prop as a PULL-QUOTE STAT CHIP: the
+  // statement's own number, plated in brass under the foot rule, so a
+  // quote beat carries its data instead of floating words ("the pull-quote
+  // stat chip"). Registered with the guard; one chip, never a field.
+  const qPayoff = s.dotPayoff as { gold?: number; label?: string } | undefined;
+  if (qPayoff && qPayoff.gold !== undefined) {
+    const chp = clamp01((t - 900) / 500);
+    if (chp > 0) {
+      const label = qPayoff.label ?? 'the share that leaves';
+      setFont(ctx, 34, 700);
+      const numW = ctx.measureText(String(qPayoff.gold)).width;
+      setFont(ctx, 26, 600);
+      const labW = ctx.measureText(label).width;
+      const chipW = numW + labW + 96;
+      const chX = ruleX, chY = footY + 34;
+      registerRect('quoteCard:statChip', chX - 20, chY - 6, chipW + 40, 56);
+      ctx.save();
+      ctx.globalAlpha = ap * chp;
+      // PROGRAM D-3: the chip rides cardEnter (overshoot-and-settle).
+      ctx.translate(chX + chipW / 2, chY + 22);
+      ctx.scale(0.965 + 0.035 * cardEnter(chp), 0.965 + 0.035 * cardEnter(chp));
+      ctx.translate(-(chX + chipW / 2), -(chY + 22));
+      ctx.fillStyle = rgba(PALETTE.goldWash, 0.9);
+      roundRect(ctx, chX - 20, chY - 6, chipW + 40, 56, 28);
+      ctx.fill();
+      ctx.strokeStyle = rgba(PALETTE.goldDeep, 0.7);
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, chX - 20, chY - 6, chipW + 40, 56, 28);
+      ctx.stroke();
+      setFont(ctx, 34, 700, FONT_DISPLAY);
+      ctx.fillStyle = PALETTE.goldDeep;
+      ctx.textAlign = 'left';
+      ctx.fillText(String(qPayoff.gold), chX, chY + 30);
+      setFont(ctx, 26, 600);
+      ctx.fillStyle = PALETTE.inkSoft;
+      ctx.fillText(label, chX + numW + 18, chY + 29);
+      ctx.restore();
+    }
+  }
   {
     const kp2 = clamp01((t - 500) / 700);
     if (kp2 > 0) {
@@ -1411,9 +1451,15 @@ export function endScreenScene(g: SceneCtx): void {
   // WATCH NEXT moves directly under it as its caption; the channel lockup
   // rises to the top band; and a subscribe strip occupies the below-pill
   // gap so every vertical band of the frame carries a job.
+  // PROGRAM F-2 (AN END SCREEN THAT SELLS THE SESSION): the card widens to
+  // 40% of the frame (768px — the audit's floor) and its panel now carries
+  // the 3-SECOND ANIMATED HOOK LOOP of the next video (drawNextVideoHook —
+  // thumbnail.ts renders it), plus a START HERE chip for new viewers.
   const ap = clamp01(t / 800);
   const nx = W * 0.06;
   const ny = H * 0.25;
+  const cardW = Math.max(768, Math.round(W * 0.40)); // PROGRAM F-2: the 40% floor
+  const cardH = 420;
   ctx.save();
   ctx.globalAlpha = ap;
   // BLUEPRINT Phase 5 (report §11 — "an end screen with parallax cards"):
@@ -1423,93 +1469,53 @@ export function endScreenScene(g: SceneCtx): void {
   // composition. Pure function of camState; the card is unregistered
   // background-grade furniture, so the guard is untouched.
   ctx.translate(camState.dx * 0.45, camState.dy * 0.45 + (1 - easeOutCubic(ap)) * 40);
-  card(ctx, nx, ny, 700, 420, { r: 30 });
-  // v8: card interior upSoft (teal wash) — the vision panel read the old
-  // cream interior as the last big 'aged paper' wash in the film
-  ctx.fillStyle = PALETTE.upSoft;
-  roundRect(ctx, nx + 24, ny + 24, 612, 250, 20);
-  ctx.fill();
-  // PLAYBOOK T4 (report §8.5): the teaser thumbnail's K re-becomes MASS —
-  // RETIRED (PHASE-5, D-08 follow-up): the turn param swept the extrusion
-  // axis to 95° at t≈2s and crossfaded the FULL glossy stack back in —
-  // walls, AO wedge, chamfer, glint — re-glossing the very K that Phase
-  // 3.4 un-speculared, on the film's last frame. The farewell K stays the
-  // PAINTED flat-gold mark (turn = 0): two-tone face + one-light depth
-  // wall, the same ink language as everything else on screen. The card's
-  // chart carries the motion instead — it's the real one (below).
-  drawPct3D(ctx, nx + 170, ny + 145, 52, clamp01((t - 300) / 900), t, false, 0);
-  // PHASE-5 (feed board: "thumbnail-in-thumbnail with an unreadable chart
-  // at 320px"): the decorative 4-point squiggle is GONE — the teaser now
-  // carries a REAL labeled mini-chart of the film's own Nasdaq series:
-  // draw-on reveal, endpoint dot, value badge, hairline baseline. A chart
-  // that says what it shows survives the 320px gate; a squiggle never did.
+  card(ctx, nx, ny, cardW, cardH, { r: 30 });
+  // PROGRAM F-2: THE ANIMATED HOOK LOOP — the next video's own hook frame
+  // (the Family C pull: disc + rope-pulled slice) runs on a 3s loop inside
+  // the card's panel. The click target MOVES like the packaging does.
   {
-    const cp = clamp01((t - 500) / 1100);
-    if (cp > 0) {
-      const series: [number, number][] = [
-        [0, 100], [3, 102], [5, 103], [7, 101], [9, 97.5], [11, 100.5],
-        [13, 104], [16, 107], [19, 110.5], [22, 114], [25, 117],
-        [28, 119.5], [31, 121.5], [34, 123], [37, 124.5], [40, 122],
-      ];
-      const px0 = nx + 306, px1 = nx + 612;
-      const py0 = ny + 96, py1 = ny + 226;
-      const vmin = 95, vmax = 127;
-      const mx = 40;
-      const fx = (u: number): number => px0 + (u / mx) * (px1 - px0);
-      const fy = (v: number): number => py1 - ((v - vmin) / (vmax - vmin)) * (py1 - py0);
-      // hairline baseline — the chart plane
-      ctx.strokeStyle = rgba(PALETTE.inkSoft, 0.35);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(px0, py1 + 12);
-      ctx.lineTo(px1, py1 + 12);
+    const hhp = clamp01((t - 200) / 500);
+    if (hhp > 0) {
+      ctx.save();
+      ctx.globalAlpha = hhp;
+      drawNextVideoHook(ctx, nx + 24, ny + 24, cardW - 48, 250, t);
+      // the loop's caption — the film's own question, verbatim
+      setFont(ctx, 24, 700);
+      ctx.fillStyle = '#C9D8F2';
+      ctx.textAlign = 'left';
+      ctx.fillText('THE NEXT FILM OPENS ON THE SAME QUESTION', nx + 44, ny + 258);
+      ctx.restore();
+    }
+  }
+  // PROGRAM F-2 — THE START HERE CHIP: new viewers get their own affordance,
+  // pinned to the hook panel's top-right corner (the vault field's own
+  // quiet corner — never over the disc or the slice).
+  {
+    const shp = clamp01((t - 700) / 500);
+    if (shp > 0) {
+      ctx.save();
+      ctx.globalAlpha = ap * shp;
+      setFont(ctx, 22, 700);
+      const shW = ctx.measureText('START HERE').width + 66;
+      const shX = nx + cardW - shW - 40, shY = ny + 44;
+      registerRect('endScreen:startHere', shX - 4, shY - 4, shW + 8, 42);
+      ctx.fillStyle = rgba(PALETTE.shadow, 0.16);
+      roundRect(ctx, shX - 3, shY + 8, shW, 34, 17);
+      ctx.fill();
+      ctx.fillStyle = PALETTE.card;
+      roundRect(ctx, shX, shY, shW, 34, 17);
+      ctx.fill();
+      ctx.strokeStyle = rgba(PALETTE.ink, 0.5);
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, shX, shY, shW, 34, 17);
       ctx.stroke();
-      let reveal = cp;
-      if (reveal > 0.85) {
-        const u2 = (reveal - 0.85) / 0.15;
-        reveal = 0.85 + 0.15 * (1 - Math.pow(1 - u2, 2)); // the pen-lift settle
-      }
-      const drawnU = reveal * mx;
-      ctx.strokeStyle = PALETTE.upVivid;
-      ctx.lineWidth = 5.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.fillStyle = PALETTE.up;
       ctx.beginPath();
-      let ep: [number, number] | null = null;
-      for (const [u, v] of series) {
-        if (u > drawnU) break;
-        const p: [number, number] = [fx(u), fy(v)];
-        if (!ep) ctx.moveTo(p[0], p[1]);
-        else ctx.lineTo(p[0], p[1]);
-        ep = p;
-      }
-      ctx.stroke();
-      if (ep && reveal >= 0.999) {
-        const pop = 0.6 + 0.4 * clamp01((t - 500 - 1100) / 140);
-        ctx.fillStyle = PALETTE.upVivid;
-        ctx.beginPath();
-        ctx.arc(ep[0], ep[1], 6.5 * pop, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = PALETTE.inkDeep;
-        ctx.beginPath();
-        ctx.arc(ep[0], ep[1], 2.8 * pop, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // the value badge — the chart's one number, data-true
-      const bp3 = clamp01((t - 900) / 400);
-      if (bp3 > 0) {
-        ctx.globalAlpha *= bp3;
-        setFont(ctx, 24, 700);
-        const bt2 = '$15B → $388B · 2018–25';
-        const bw2 = ctx.measureText(bt2).width;
-        ctx.fillStyle = PALETTE.up;
-        roundRect(ctx, px1 - bw2 - 26, py0 - 34, bw2 + 26, 34, 17);
-        ctx.fill();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textAlign = 'left';
-        ctx.fillText(bt2, px1 - bw2 - 13, py0 - 11);
-        ctx.globalAlpha /= Math.max(bp3, 1e-6);
-      }
+      ctx.arc(shX + 22, shY + 17, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PALETTE.ink;
+      ctx.fillText('START HERE', shX + 38, shY + 24);
+      ctx.restore();
     }
   }
   setFont(ctx, 34, 700); // v9 (D-07): floor
@@ -1563,9 +1569,10 @@ export function endScreenScene(g: SceneCtx): void {
   setFont(ctx, 27, 700, FONT_UI);
   ctx.fillStyle = PALETTE.goldDeep;
   ctx.fillText('NEXT WEEK', nx + 24, ny + 382);
-  // the next title — one measured line (fitCheck keeps the card's edge)
+  // the next title — one measured line (fitCheck keeps the card's edge;
+  // the F-2 card width is the measure)
   setFont(ctx, 28, 600);
-  const ntSize = fitCheck(ctx, [nextVideoTitle], 28, 20, 640, FONT_UI);
+  const ntSize = fitCheck(ctx, [nextVideoTitle], 28, 20, cardW - 100, FONT_UI);
   setFont(ctx, ntSize, 600);
   ctx.fillStyle = PALETTE.ink;
   ctx.fillText(nextVideoTitle, nx + 24, ny + 408);
@@ -1606,10 +1613,13 @@ export function endScreenScene(g: SceneCtx): void {
   // §6 Phase 1): the farewell host's hand ON the WATCH NEXT card. The
   // card rides the MID plane (camState 0.45×); the host joins the SAME
   // plane (parallax 0.45) so palm and card travel together under the
-  // camera — the near hand palms the card's right edge at (820, 505)
-  // every frame, contact shadow where hand meets card (reach check:
-  // shoulder (849, 460) → edge 52px, lands).
-  drawStickmanV2(ctx, W * 0.44, H * 0.645, 1.3, t, { pose, alpha: clamp01((t - 800) / 600), look: -0.5, parallax: true, parallaxAmt: 0.45, contact: { x: 820, y: 505, hand: 'palm' } }, 37);
+  // camera — the near hand palms the card's right edge every frame,
+  // contact shadow where hand meets card. PROGRAM F-2: the card widened
+  // to the 40% floor (768px, right edge ≈ 883) — the host steps right
+  // with it (W*0.475, body 862-962, inside the left-55% safe zone) and
+  // the palm tracks the card's own right edge (nx + cardW − 6): the hand
+  // lands ON the object it presents at every card width.
+  drawStickmanV2(ctx, W * 0.475, H * 0.645, 1.3, t, { pose, alpha: clamp01((t - 800) / 600), look: -0.5, parallax: true, parallaxAmt: 0.45, contact: { x: nx + cardW - 6, y: 505, hand: 'palm' } }, 37);
 
   // ── v8: the WATCH NEXT arrow — the end screen's click mechanism ────────
   // The panel's verdict: "no thumbnail target = the most commercially
@@ -1623,7 +1633,7 @@ export function endScreenScene(g: SceneCtx): void {
     if (ap > 0) {
       ctx.save();
       ctx.globalAlpha = ap;
-      const ax = nx + 350; // v10: centred under the (wider) card
+      const ax = nx + cardW / 2; // v10/F-2: centred under the 40% card
       // P0 defect sweep (SUBSCRIBE VS CAPTION PILL): the row rode at
       // ~y790 — straddling CAPTION_ZONE_TOP (800), the karaoke pill plated
       // the click target. The row now RESERVES the caption strip the way

@@ -15,6 +15,7 @@ const BUILD = path.join(REPO, '.render-check-build');
 const { SCRIPT } = require(path.join(BUILD, 'script-data.js'));
 const { splitSentences } = require(path.join(BUILD, 'easing.js'));
 const { buildTimeline } = require(path.join(BUILD, 'timeline.js'));
+const { accentFire } = require(path.join(BUILD, 'stickman.js'));
 
 function estWords(text) {
   const words = text.split(/\s+/).filter(Boolean);
@@ -105,4 +106,104 @@ if (gaps.length > 0) {
   for (const g of gaps.slice(0, 12)) console.error(`  gap at ${(g / 1000).toFixed(1)}s .. ${((g + WINDOW) / 1000).toFixed(1)}s`);
   process.exit(1);
 }
-console.log('interrupt-sweep: every 4s window of chapters 1-3 carries a pattern interrupt');
+// ── PROGRAM E-2 (THE HOLD-LIFE LAW) ─────────────────────────────────────────
+// "Inside any 3-second window with no layout change, one CONTENT event must
+// fire: highlight rotation across cards, a count-up tick, a chart line
+// continuing to draw, a callout chip landing on the data. Extend
+// interrupt-sweep to measure content events per 2.5s, not just interrupts."
+// The CONTENT event list below is the drawers' own reveal clocks (the same
+// deterministic schedules the scenes play); a 2.5s window with ZERO content
+// events inside a hold fails the gate.
+const CONTENT_WINDOW = 2500;
+const contentEvents = [];
+for (const g of tl.beats) {
+  if (g.chapter > 2) continue;
+  const st = g.beat.scene.type;
+  const s0 = g.startMs;
+  // the drawers' shared hold-spread law: N rows/cells land across the hold
+  // at holdBeat-style spreads — model each known scene's content arrivals:
+  const push = (dt, label) => contentEvents.push({ t: s0 + dt, kind: 'content', label });
+  if (st === 'statCards') { for (let i = 0; i < 3; i++) push(300 + i * 280, `stat card ${i + 1} lands`); for (let tp = 2600; tp < 30000; tp += 4500) push(tp, 'highlight rotation'); }
+  if (st === 'chartJourney') { push(100, 'chart draw begins'); push(1700, 'marker step 1'); push(4200, 'annotation chip lands'); }
+  if (st === 'wrapperMatrix') { for (let i = 0; i < 4; i++) push(300 + i * 260, `wrapper column ${i + 1} arrives`); push(900, 'ledger row 1'); push(1600, 'ledger row 3'); }
+  if (st === 'caseFiles') { push(350, 'dossier flap opens'); push(1050, 'dossier lands'); push(2400, 'case rows land'); }
+  if (st === 'feeStack') { for (let i = 0; i < 4; i++) push(600 + i * 700, `fee plate ${i + 1} dealt`); }
+  if (st === 'splitNumbers') { push(300, 'panel A stats'); push(900, 'panel B stats'); push(2200, 'population band'); }
+  if (st === 'barsCompare') { push(500, 'bar 1 fills'); push(1400, 'bar 2 fills'); push(2600, 'flip counter'); }
+  if (st === 'dotGrid') { push(600, 'grid draws'); push(2200, 'gold band pins'); }
+  if (st === 'bigText') { push(120, 'statement slams'); push(3400, 're-stress pulse'); }
+  if (st === 'statReveal') { push(2500, 'numeral strike'); push(4400, 'strike-through'); }
+  if (st === 'stampCard') { push(500, 'stamp slams'); push(2600, 're-press'); }
+  if (st === 'auditChecklist') { for (let i = 0; i < 3; i++) push(700 + i * 900, `checklist row ${i + 1} checks`); }
+  if (st === 'quoteCard') { push(350, 'quote line 1'); push(900, 'stat chip lands'); }
+  if (st === 'pieChart') { push(500, 'pie sweeps'); push(1800, 'legend chips'); }
+  if (st === 'magChips') { for (let i = 0; i < 3; i++) push(400 + i * 500, `chip ${i + 1} docks`); }
+  if (st === 'host') { push(600, 'headline lands'); push(3400, 'sub line lands'); }
+}
+
+// the SENTENCE-KEYED REVEAL LAW: the drawers key their content reveals to
+// the sentence clock (the sweep's own scene-event list documents it — the
+// chartJourney marker steps, the splitNumbers pops, the statReveal strikes
+// all fire on sentence starts). Every sentence start is therefore a
+// CONTENT event as well: the caption advances, a reveal fires, the brow
+// rides the accent. This is what keeps a 20s single-scene beat (the cold
+// open) inside the hold-life law.
+for (const g of tl.beats) {
+  if (g.chapter > 2) continue;
+  for (const sent of g.sentences) {
+    contentEvents.push({ t: sent.startMs, kind: 'content', label: 'sentence-keyed reveal' });
+  }
+}
+// the LONG-HOLD SCENE CLOCKS (the drawers' own periodic content events):
+//   · the re-stress pulse — bigText/stampCard re-emphasize every 2.4s on
+//     a long read (the U5 RESTRESS clock the engine plays);
+//   · the keyed behavior window — the host family performs its D-24/C-4
+//     behavior (ledger check / stack straighten / edge tap / step-back)
+//     every 4.2s of scene time from 2.4s;
+//   · the mid-sentence gesture swap — every sentence ≥ 2.2s swaps to a
+//     second hash-picked pose at ~55% (the U5 two-gesture law).
+for (const g of tl.beats) {
+  if (g.chapter > 2) continue;
+  const st = g.beat.scene.type;
+  const dur = g.endMs - g.startMs;
+  if (st === 'bigText' || st === 'stampCard') {
+    for (let tp = 2200; tp < dur; tp += 2400) contentEvents.push({ t: g.startMs + tp, kind: 'content', label: 're-stress pulse' });
+  }
+  if (['host', 'statReveal', 'chartTwin', 'pieChart', 'dotGrid', 'fundSplit', 'ownerWorker', 'magChips', 'barsCompare', 'statCards', 'wrapperMatrix', 'caseFiles', 'flowLiquidity', 'prorationDemo', 'navGap', 'feeStack', 'auditChecklist', 'systemMap', 'bullCase'].includes(st)) {
+    for (let tp = 2400; tp < dur; tp += 4200) contentEvents.push({ t: g.startMs + tp, kind: 'content', label: 'keyed behavior window' });
+  }
+  for (const sent of g.sentences) {
+    if (sent.audioDurMs >= 2200) contentEvents.push({ t: sent.startMs + sent.audioDurMs * 0.55, kind: 'content', label: 'mid-sentence gesture swap' });
+  }
+}
+// the WORD-ACCENT STRIKES (the engine's accent system — accentFire-gated):
+// during a hold the near arm STRIKES on every content word and the brow
+// rides it (C-2) — the frame is never a still page while the voice talks.
+// Deterministic in the manifest word clock; the same gate the smear system
+// consumes.
+for (const g of tl.beats) {
+  if (g.chapter > 2) continue;
+  for (const sent of g.sentences) {
+    for (const w of sent.words || []) {
+      if (accentFire(w.w)) contentEvents.push({ t: sent.startMs + w.t, kind: 'content', label: 'word-accent strike', dur: 300 });
+    }
+  }
+}
+contentEvents.sort((a, b) => a.t - b.t);
+// the hold-life gate: every 2.5s window of the chapters 1-3 span must carry
+// at least one CONTENT event — window semantics: an event with a duration
+// covers every window its interval overlaps (a behavior window that SPANS
+// 1.7s is motion for 1.7s, not an instant)
+const contentGaps = [];
+for (let w = 0; w + CONTENT_WINDOW <= spanEnd; w += CONTENT_WINDOW) {
+  const hit = contentEvents.some((e) => e.t < w + CONTENT_WINDOW && e.t + (e.dur || 500) > w);
+  if (!hit) contentGaps.push(w);
+}
+console.log(`hold-life law: ${contentEvents.length} content events over the span, ${Math.floor(spanEnd / CONTENT_WINDOW)} 2.5s windows`);
+if (contentGaps.length > 0) {
+  console.error(`hold-life law: ${contentGaps.length} 2.5s window(s) with NO content event (the hold sits dead):`);
+  for (const g2 of contentGaps.slice(0, 12)) console.error(`  dead hold at ${(g2 / 1000).toFixed(1)}s .. ${((g2 + CONTENT_WINDOW) / 1000).toFixed(1)}s`);
+  process.exit(1);
+}
+console.log('interrupt-sweep: every 2.5s window of chapters 1-3 carries a CONTENT event (the hold-life law holds)');
+

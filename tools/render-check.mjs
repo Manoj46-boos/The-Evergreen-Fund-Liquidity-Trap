@@ -83,6 +83,11 @@ let propViolations = 0;
 let occupancyViolations = 0;
 let valueViolations = 0;
 let feedViolations = 0;
+// PROGRAM E-1 (ZERO DEAD FRAMES): the emptiness-probe + frame-zero
+// occupancy counters — any blank frame, or any group's FIRST frame under
+// the 20% content floor, fails the gate before upload.
+let emptyViolations = 0;
+let frameZeroViolations = 0;
 // P4 (Visual Verdict report) — the perception-gate counters. Declared here
 // because the hand-ink gate increments them inside render(), which runs
 // before the P4 phase below.
@@ -213,12 +218,55 @@ const targets = [];
 const t0 = Date.now();
 let guardViolations = 0;
 
+// PROGRAM E-1 — THE EMPTINESS PROBE (pixel truth, not registry truth):
+// the frame's CONTENT coverage = the share of sampled pixels whose luma
+// differs from the frame's own background field (sampled at the four
+// corners) by more than the 10-luma floor — the scene plate, arch and
+// stage architecture ARE designed occupancy (E-1 paints the plate at
+// every boundary); only the raw canvas + grain read as background. Pure
+// pixel math on the rendered frame.
+function contentCoverage(canvasCtx, cW, cH) {
+  const img = canvasCtx.getImageData(0, 0, cW, cH).data;
+  const lumas = [];
+  const corners = [
+    [Math.round(cW * 0.04), Math.round(cH * 0.05)],
+    [Math.round(cW * 0.96), Math.round(cH * 0.05)],
+    [Math.round(cW * 0.04), Math.round(cH * 0.95)],
+    [Math.round(cW * 0.96), Math.round(cH * 0.95)],
+  ];
+  for (const [cx, cy] of corners) {
+    const o = (cy * cW + cx) * 4;
+    lumas.push(0.2126 * img[o] + 0.7152 * img[o + 1] + 0.0722 * img[o + 2]);
+  }
+  lumas.sort((a, b) => a - b);
+  const bgL = lumas[Math.floor(lumas.length / 2)];
+  let content = 0, total = 0;
+  for (let py = 0; py < cH; py += 4) {
+    for (let px2 = 0; px2 < cW; px2 += 4) {
+      const o = (py * cW + px2) * 4;
+      const l = 0.2126 * img[o] + 0.7152 * img[o + 1] + 0.0722 * img[o + 2];
+      if (Math.abs(l - bgL) > 10) content++;
+      total++;
+    }
+  }
+  return content / total;
+}
+
 function render(name, tMs) {
   if (guard) {
     guard.collisionGuard.enabled = true;
     guard.resetGuard(name);
   }
   drawFrame(ctx, tl, tMs, OPTS);
+  // PROGRAM E-1 — THE EMPTINESS PROBE: any picked frame under 8% content
+  // coverage is a BLANK FRAME — the gate fails before upload.
+  {
+    const cov = contentCoverage(ctx, W, H);
+    if (cov < 0.08) {
+      emptyViolations++;
+      console.error(`  !! EMPTINESS PROBE — ${name}: content coverage ${(cov * 100).toFixed(1)}% (< 8% floor) — a blank frame ships`);
+    }
+  }
   // PHASE 1 GATES — per-frame assertions (registries hold THIS frame only)
   const figs = figureRegistry();
   const slv = scaleLawViolations();
@@ -1107,9 +1155,60 @@ if (guard) {
   }
 }
 
+// ── PROGRAM E-1 — THE FRAME-ZERO OCCUPANCY SWEEP ───────────────────────────
+// E-1 law, gated at its own severities:
+//   (1) THE FILM FIRST FRAME must own >= 20% of the frame — the poster
+//       promise — a HARD gate (the cold open lands the pulled slice + the
+//       $1M number on frame 0; the D-04/U-23 contract).
+//   (2) EVERY group boundary frame paints the scene plate BEFORE the first
+//       drawer frame (the director E-1 fix) — any boundary frame under the
+//       8% BLANK floor is a dead frame and fails (the emptiness law).
+//   (3) The boundary coverage distribution is REPORTED — the staging
+//       worklist for landing every run anchor content ON frame zero.
+{
+  const runStarts = [];
+  for (let i = 0; i < tl.beats.length; i++) {
+    const key = tl.beats[i].beat.scene.sceneKey;
+    if (i === 0 || tl.beats[i - 1].beat.scene.sceneKey !== key) {
+      runStarts.push({ key, type: tl.beats[i].beat.scene.type, t: tl.beats[i].startMs });
+    }
+  }
+  let checked = 0;
+  let underTwenty = 0;
+  let worst = { cov: 1, key: '' };
+  for (const rs of runStarts) {
+    if (guard) {
+      guard.collisionGuard.enabled = true;
+      guard.resetGuard(`frame-zero:${rs.key}`);
+    }
+    drawFrame(ctx, tl, rs.t, OPTS);
+    const cov = contentCoverage(ctx, W, H);
+    checked++;
+    if (cov < worst.cov) worst = { cov, key: `${rs.type}/${rs.key}` };
+    if (cov < 0.20) underTwenty++;
+    if (cov < 0.08) {
+      frameZeroViolations++;
+      console.error(`  !! FRAME-ZERO GATE — ${rs.type}/${rs.key}: first frame owns ${(cov * 100).toFixed(1)}% (< 8% blank floor) — the boundary frame is dead air`);
+    }
+  }
+  // (1) the film first frame — the poster promise, hard at 20%
+  {
+    guard.resetGuard('frame-zero:film');
+    drawFrame(ctx, tl, 0, OPTS);
+    const cov0 = contentCoverage(ctx, W, H);
+    console.log(`  [e1 poster promise] the film first frame owns ${(cov0 * 100).toFixed(1)}% of the frame (floor 20%)`);
+    if (cov0 < 0.20) {
+      frameZeroViolations++;
+      console.error(`  !! POSTER-PROMISE GATE — the film first frame owns ${(cov0 * 100).toFixed(1)}% (< 20%) — the click promise is not on frame one`);
+    }
+  }
+  console.log(`  [e1 frame-zero] ${checked} boundary frames swept · ${underTwenty} under the 20% staging worklist (report-only) · worst ${worst.key} ${(worst.cov * 100).toFixed(1)}% · blank floor 8% is HARD`);
+}
+
 if (guardViolations || metricViolations || scaleViolations || propViolations || occupancyViolations || valueViolations || feedViolations
-  || silhouetteViolations || faceSemanticViolations || handInkViolations || motionViolations || anchorViolations || dwellViolations) {
-  console.error(`\n✗ RENDER CHECK FAILED: ${guardViolations} collision(s), ${metricViolations} metric violation(s), ${scaleViolations} scale-law violation(s), ${propViolations} prop-ledger violation(s), ${occupancyViolations} occupancy violation(s), ${valueViolations} value-mass violation(s), ${feedViolations} feed-density violation(s), ${silhouetteViolations} silhouette(s), ${faceSemanticViolations} face-semantic(s), ${handInkViolations} hand-ink(s), ${motionViolations} motion(s), ${anchorViolations} anchor(s), ${dwellViolations} hand-dwell(s) — fix the scene layout before rendering.`);
+  || silhouetteViolations || faceSemanticViolations || handInkViolations || motionViolations || anchorViolations || dwellViolations
+  || emptyViolations || frameZeroViolations) {
+  console.error(`\n✗ RENDER CHECK FAILED: ${guardViolations} collision(s), ${metricViolations} metric violation(s), ${scaleViolations} scale-law violation(s), ${propViolations} prop-ledger violation(s), ${occupancyViolations} occupancy violation(s), ${valueViolations} value-mass violation(s), ${feedViolations} feed-density violation(s), ${silhouetteViolations} silhouette(s), ${faceSemanticViolations} face-semantic(s), ${handInkViolations} hand-ink(s), ${motionViolations} motion(s), ${anchorViolations} anchor(s), ${dwellViolations} hand-dwell(s), ${emptyViolations} empty-frame(s), ${frameZeroViolations} frame-zero violation(s) — fix the scene layout before rendering.`);
   process.exit(1);
 }
 

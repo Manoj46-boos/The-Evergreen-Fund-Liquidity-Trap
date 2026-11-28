@@ -851,6 +851,13 @@ export function handGlyph(
   if (mode === 'palm') {
     mode = 'point';
   }
+  // PROGRAM B-3 (100-JUDGE VISUAL AUDIT — THREE-FINGER MITTS ABOVE RIG 2):
+  // count gestures fire ONLY above rig 2.0 — below it the count fan would
+  // dissolve to noise, so the mitten holds (the feed's readable hand); the
+  // staged arm angles still carry the one-two-three beat at working rigs.
+  if ((mode === 'count1' || mode === 'count2' || mode === 'count3') && rigScale < 2) {
+    mode = undefined;
+  }
   // PHASE-1 VISUAL AUDIT (report Phase 1 — Hands): 'grip' joins as the
   // canonical closed-contact glyph name ('fist' survives as its alias) —
   // the poses say grip because the hand GRIPS an object.
@@ -1040,6 +1047,22 @@ export function handGlyph(
     ctx.fillStyle = col;
     ctx.beginPath();
     roundRect(ctx, -hs * 0.52, -hs * 0.40, hs * 1.04, hs * 0.82, hs * 0.32);
+    // PROGRAM B-3 — THE KNUCKLE NOTCH: at hero scale (rig ≥ 2) ONE
+    // reverse-wound wedge is cut into the palm's leading edge between the
+    // finger roots — the nonzero fill removes it from the silhouette, and
+    // the blob reads as a knuckled hand. Below rig 2 the notch would
+    // dissolve (sub-2px) — the plain wedge holds, exactly the report's
+    // "keep the mitten below rig 2.0 where the notch would dissolve".
+    if (rigScale >= 2) {
+      const nX = hs * 0.52;
+      const offA = -0.34 * hs, offB = -0.10 * hs, depth = hs * 0.20;
+      // wound AGAINST the wedge's direction (counter-clockwise) so the
+      // nonzero rule subtracts it — verified by pixel probe in the harness
+      ctx.moveTo(nX - depth, (offA + offB) / 2);
+      ctx.lineTo(nX, offB);
+      ctx.lineTo(nX, offA);
+      ctx.closePath();
+    }
     ctx.fill();
     ctx.restore();
     // four separated fingers — the count glyph's PROVEN finger path (roots
@@ -2282,11 +2305,40 @@ export function drawStickmanV2(
       ctx.moveTo(rX(0.56, wW * 0.92), rY(0.56, wW * 0.92));
       ctx.quadraticCurveTo(rX(0.74, wC * 0.84), rY(0.74, wC * 0.84), rX(0.97, wS * 0.80), rY(0.97, wS * 0.80));
       ctx.stroke();
+      // PROGRAM B-2 (100-JUDGE VISUAL AUDIT — A SIGNATURE KIT THAT SURVIVES
+      // 320px): TWO GOLD SUSPENDERS — straight 6px (accent-weight)
+      // verticals over the shoulders to the waist band, each with a brass
+      // buckle dot at the waist. Hook two of four: at the feed gate the
+      // torso reads as a TAILORED body (two gold straps) instead of one
+      // gold panel — "so the torso reads at the gate".
+      {
+        ctx.strokeStyle = PALETTE.goldDisplay;
+        ctx.lineWidth = STROKE.accent;
+        ctx.lineCap = 'round';
+        for (const side of [1, -1]) {
+          const sx0 = side === 1 ? rX(0.16, wW * 0.30) : lX(0.16, wW * 0.30);
+          const sy0 = side === 1 ? rY(0.16, wW * 0.30) : lY(0.16, wW * 0.30);
+          const sx1 = side === 1 ? rX(0.78, wW * 0.26) : lX(0.78, wW * 0.26);
+          const sy1 = side === 1 ? rY(0.78, wW * 0.26) : lY(0.78, wW * 0.26);
+          ctx.beginPath();
+          ctx.moveTo(sx0, sy0);
+          ctx.lineTo(sx1, sy1);
+          ctx.stroke();
+          // the buckle — a brass dot where the strap meets the waist band
+          ctx.fillStyle = PALETTE.goldDeep;
+          ctx.beginPath();
+          ctx.arc(sx1, sy1, STROKE.accent * 0.62, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       // 100-JUDGE VISUAL AUDIT (U-04 — THE POCKET SQUARE): the packaging
       // costume's brass pocket square joins the film costume — one small
       // parallelogram peeking from the breast line, the two-tone accent
       // that makes the blazer read as TAILORED at feed scale instead of
       // as a plain torso block. Wearer's left chest = the rail's near side.
+      // PROGRAM B-2 — THREE TONES, ONE CHIP: the square gains its deep-brass
+      // edge (the fold line) and an ivory glint tick (the silk catch) — a
+      // three-tone brass chip, the packaging kit's own read, at every rig.
       {
         const psX = rX(0.63, wW * 0.52);
         const psY = rY(0.63, wW * 0.52);
@@ -2298,6 +2350,21 @@ export function drawStickmanV2(
         ctx.lineTo(psX - 5, psY + 13);
         ctx.closePath();
         ctx.fill();
+        // tone 2 — the deep-brass fold edge along the square's lower face
+        ctx.strokeStyle = PALETTE.goldDeep;
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(psX - 5, psY + 13);
+        ctx.lineTo(psX + 12, psY + 8);
+        ctx.stroke();
+        // tone 3 — the ivory glint tick on the square's upper face
+        ctx.strokeStyle = 'rgba(247, 239, 216, 0.9)';
+        ctx.lineWidth = STROKE.hairline; // the U-16 ink law's registered hairline (PROGRAM B-2 glint)
+        ctx.beginPath();
+        ctx.moveTo(psX - 4, psY + 1.5);
+        ctx.lineTo(psX + 4, psY - 2);
+        ctx.stroke();
       }
       // the deep-V notch — the shirt shows through the vest's opening
       ctx.fillStyle = hexLerp(OUTFIT.tee, '#9FC0E8', 0.45);
@@ -2438,7 +2505,22 @@ export function drawStickmanV2(
   const surpriseT = clamp01(((pose.browRaise ?? 0) - 0.55) / 0.45);
   const concernedT = clamp01(((pose.browAngle ?? 0) - 8) / 12);
   const exprDrop = concernedT * 6 - surpriseT * 5;
-  const shDrop = (pose.shoulderDrop ?? 0) + exprDrop;
+  // PROGRAM C-5 (100-JUDGE VISUAL AUDIT — CONTACT VERBS GET TWO FRAMES OF
+  // WEIGHT): when the near palm LANDS (tap / fist / bracket — every
+  // contact easeAt), the shoulder DIPS 3px for two frames before settling:
+  // the elbow absorbs the dip (the hand stays IK-pinned to its target),
+  // and the arm visibly takes the body's weight at the touch instant —
+  // "the hand acquires mass, which is the entire difference between a
+  // gesture and an interaction". Pure f(t) about the landing clock; zero
+  // outside its 260ms window, so pose continuity is exact.
+  let landDip = 0;
+  if (r.contact?.easeAt !== undefined) {
+    const landDt = t - (r.contact.easeAt + 480); // the 480ms solve blend = the touch instant
+    if (landDt >= 0 && landDt < 260) {
+      landDip = 3 * Math.pow(Math.sin(Math.PI * clamp01(landDt / 260)), 0.6);
+    }
+  }
+  const shDrop = (pose.shoulderDrop ?? 0) + exprDrop + landDip;
   // ── CONTACT VERBS: solve the near arm onto the scene's touch point ──
   // The shoulder anchor here replicates limb2's own start point 1:1 (the
   // same neck + shoulder-tilt + drop terms), so the SOLVED angles land the
@@ -3643,7 +3725,12 @@ export function drawStickmanV2(
     ctx.arc(14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = PALETTE.goldDeep;
-    ctx.lineWidth = Math.max(2.6, featureFloor(2.4));
+    // PROGRAM B-2 (100-JUDGE VISUAL AUDIT — A SIGNATURE KIT THAT SURVIVES
+    // 320px): the rim lifts from the 2.6px hairline to the ACCENT-WEIGHT
+    // 6px screen floor — the U-16 ink law's accent weight, the same value
+    // the kicker rule and the % rule carry. One of the four hooks that
+    // make the silhouette nameable at phone scale.
+    ctx.lineWidth = featureFloor(6);
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.arc(-14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
@@ -3651,6 +3738,17 @@ export function drawStickmanV2(
     ctx.beginPath();
     ctx.arc(14 + eyeDX, -5.5, lensHost, 0, Math.PI * 2);
     ctx.stroke();
+    // PROGRAM B-2 — THE SINGLE CYAN LENS GLINT: one small upVivid arc on
+    // the left lens' upper-left quadrant (ONE glint, not two — a glint on
+    // every lens is a spreadsheet). The accent reads at 320px as the
+    // glasses' one lit point.
+    ctx.strokeStyle = PALETTE.upVivid;
+    ctx.lineWidth = featureFloor(3.5);
+    ctx.beginPath();
+    ctx.arc(-14 + eyeDX, -5.5, lensHost * 0.62, Math.PI * 1.12, Math.PI * 1.38);
+    ctx.stroke();
+    ctx.strokeStyle = PALETTE.goldDeep;
+    ctx.lineWidth = featureFloor(6);
     // the bridge + the temple hints (the arms that reach the ears)
     ctx.beginPath();
     ctx.moveTo(-14 + eyeDX + lensHost, -7.5);

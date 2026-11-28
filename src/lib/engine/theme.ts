@@ -1374,7 +1374,11 @@ export function paintBg(
   W: number,
   H: number,
   t = 0,
-  chapterTone: 'up' | 'down' | 'gold' | 'neutral' = 'neutral'
+  chapterTone: 'up' | 'down' | 'gold' | 'neutral' = 'neutral',
+  /** PROGRAM D-4: the host's walk phase 0..1 while a walk owns the frame —
+   *  passed straight to the stage world's desk pieces (the papers flutter
+   *  under the stride). Undefined = the set stands still. */
+  walkPhase?: number
 ): void {
   // VAULT NOIR CANVAS — a vertical navy gradient (never pure black: the
   // floor lifts toward a visible steel blue). Bled 96px past the canvas to
@@ -1395,16 +1399,25 @@ export function paintBg(
   // the vault: teal flows (market/data), coral friction (cases/trap),
   // brass resolution (conclusion/end). The pools ride the same 6s clock;
   // on the dark canvas a 0.16-0.24 glow reads like real set lighting.
+  // PROGRAM B-4 (100-JUDGE VISUAL AUDIT — FREEZE THE WORLD COLOR): "Cap
+  // the per-chapter wash at 3-4% and lock bgTop/bgBottom across all nine
+  // chapters. The purple/maroon mid-film currently reads as a different
+  // show inside the same upload; one navy world with accent shifts is the
+  // premium read." The shipped 13-18% glows tinted whole chapters toward
+  // maroon/teal; capped to the 3.0-4.0% band the nine chapters are ONE
+  // navy world and the accents are a LIGHTING shift, not a re-skin.
+  // bgTop/bgBottom were already locked (one PALETTE, no per-chapter
+  // override) — the law's other half is satisfied by construction.
   const strength =
     chapterTone === 'neutral'
-      ? 0.13
+      ? 0.030
       : chapterTone === 'gold'
-        ? 0.17
+        ? 0.036
         : chapterTone === 'down'
-          ? 0.15
-          : 0.18;
-  glowBlob(ctx, W * 0.82, H * 0.16 + driftY(t), W * 0.5, wash, strength + 0.014 * pulse);
-  glowBlob(ctx, W * 0.1, H * 0.9, W * 0.42, wash, strength * 0.62 + 0.012 * (1 - pulse));
+          ? 0.032
+          : 0.036;
+  glowBlob(ctx, W * 0.82, H * 0.16 + driftY(t), W * 0.5, wash, strength + 0.004 * pulse);
+  glowBlob(ctx, W * 0.1, H * 0.9, W * 0.42, wash, strength * 0.62 + 0.003 * (1 - pulse));
   // THE KEY LIGHT — one warm brass gradient from the upper-left; the same
   // one-light rule every shadow in the film answers.
   {
@@ -1418,7 +1431,7 @@ export function paintBg(
   // reflecting the room), beneath the vignette + grain.
   glowBlob(ctx, W * 0.5, H * 0.72, W * 0.34, PALETTE.up, 0.05 + 0.008 * pulse);
   // the stage world — the vault floor plane + architecture band
-  drawStageWorld(ctx, W, H, t);
+  drawStageWorld(ctx, W, H, t, walkPhase);
 }
 
 const driftY = (t: number): number => Math.sin(t / 5200) * 26;

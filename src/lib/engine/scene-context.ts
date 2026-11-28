@@ -64,6 +64,12 @@ export interface SceneCtx {
    *  re-blocks itself every few beats instead of holding one layout for
    *  9-15 consecutive beats. Computed by the director; scrub-safe. */
   runIdx: number;
+  /** PROGRAM D-4 (SECONDARY MOTION ON THE WORLD): the beat's walk phase
+   *  0..1 while a walk owns the staging (undefined when standing) — the
+   *  bg() helpers pass it to paintBg so the desk set pieces flutter
+   *  under the stride. Computed by the director from the beat's own
+   *  walk props; scrub-safe. */
+  walkPhase?: number;
 }
 
 export type SceneDrawer = (g: SceneCtx) => void;
